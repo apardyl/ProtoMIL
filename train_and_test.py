@@ -2,7 +2,8 @@ from enum import Enum
 
 import numpy as np
 import torch
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_auc_score
+from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix, ConfusionMatrixDisplay, roc_auc_score, \
+    average_precision_score
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as func
 
@@ -20,7 +21,8 @@ class TrainMode(Enum):
 
 
 def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_mask=True,
-                   log_writer: SummaryWriter = None, step: int = 0):
+                   log_writer: SummaryWriter = None, step: int = 0, multilabel=False):
+                   #bces=[], cl_csts=[], sep_csts=[]):
     '''
     model: the multi-gpu model
     dataloader:
@@ -36,7 +38,10 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     total_separation_cost = 0
     total_avg_separation_cost = 0
     total_loss = 0
-    conf_matrix = np.zeros((2, 2), dtype='int32')
+    if multilabel:
+        conf_matrix = np.zeros((20, 2, 2), dtype='int32')
+    else:
+        conf_matrix = np.zeros((2, 2), dtype='int32')
     preds = []
     targets = []
 
@@ -44,15 +49,18 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
         loss_fn = torch.nn.CrossEntropyLoss()
     elif config.loss_function == 'focal':
         loss_fn = FocalLoss(alpha=0.5, gamma=2)
+    elif config.loss_function == 'binary_cross_entropy':
+        loss_fn = torch.nn.BCELoss(reduction='none')
     else:
         raise NotImplementedError('unknown loss function: ' + config.loss_function)
 
     for i, (image, label) in enumerate(dataloader):
         input = image.cuda()
 
-        if len(label) > 1:
-            label = label.max().unsqueeze(0)
+        if not multilabel and len(label) > 1:
+            label = label.max()
 
+        label = label.unsqueeze(0)
         target = label.cuda()
 
         # torch.enable_grad() has no effect outside of no_grad()
@@ -60,7 +68,15 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
         with grad_req:
             output, min_distances, attention, _ = model.forward_(input)
 
-            cross_entropy = loss_fn(output, target)
+            if multilabel:
+                bce_vals = loss_fn(output, target)
+                n_positive = torch.count_nonzero(label)
+                n_negative = label.shape[1] - n_positive
+                w = n_negative / n_positive
+                bce_vals[label == 1] *= w
+                cross_entropy = torch.mean(bce_vals)
+            else:
+                cross_entropy = loss_fn(output, target)
             if config.mil_pooling == 'loss_attention':
                 instance_labels = target * torch.ones(input.size(0), dtype=torch.long, device=input.device)
                 loss_2 = WeightCrossEntropyLoss()(model.out_c, instance_labels, model.A)
@@ -73,32 +89,55 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
                 # prototypes_of_correct_class is a tensor of shape batch_size * num_prototypes
                 
-                a = attention.detach().cpu()
-                tmp = np.interp(a, (a.min(), a.max()), (0.001, 1))
-                m = torch.tensor(tmp).cuda()
+                # a = attention.detach().cpu()
+                # tmp = np.interp(a, (a.min(), a.max()), (0.001, 1))
+                # m = torch.tensor(tmp).cuda()
 
                 # calculate cluster cost
-                prototypes_of_correct_class = torch.t(model.prototype_class_identity[:, label]).cuda()
-                inverted_distances, _ = torch.max((max_dist - (min_distances * m.T)) * prototypes_of_correct_class, dim=1)
+                if multilabel:
+                    class_idx = []
+                    for idx, l in enumerate(label.squeeze()):
+                        if l == 1:
+                            class_idx.append(idx)
+                else:
+                    class_idx = label
+
+                prototype_identity = model.prototype_class_identity[:, class_idx]
+                if len(class_idx) > 1:
+                    prototype_identity = torch.sum(prototype_identity, dim=1, keepdim=True)
+                prototypes_of_correct_class = torch.t(prototype_identity).cuda()
+                inverted_distances, _ = torch.max((max_dist - min_distances) * prototypes_of_correct_class, dim=1)
                 cluster_cost = torch.mean(max_dist - inverted_distances)
 
                 # calculate separation cost
                 prototypes_of_wrong_class = 1 - prototypes_of_correct_class
                 inverted_distances_to_nontarget_prototypes, _ = \
-                    torch.max((max_dist - (min_distances * m.T)) * prototypes_of_wrong_class, dim=1)
+                    torch.max((max_dist - min_distances) * prototypes_of_wrong_class, dim=1)
                 separation_cost = torch.mean(max_dist - inverted_distances_to_nontarget_prototypes)
 
                 # calculate avg cluster cost
                 avg_separation_cost = \
-                    torch.sum((min_distances * m.T) * prototypes_of_wrong_class, dim=1) / torch.sum(prototypes_of_wrong_class,
+                    torch.sum(min_distances * prototypes_of_wrong_class, dim=1) / torch.sum(prototypes_of_wrong_class,
                                                                                             dim=1)
                 avg_separation_cost = torch.mean(avg_separation_cost)
 
-                if use_l1_mask:
-                    l1_mask = 1 - torch.t(model.prototype_class_identity).cuda()
-                    l1 = (model.last_layer.weight * l1_mask).norm(p=1)
+                if multilabel:
+                    l1 = 0
+                    for c in range(model.num_classes):
+                        if use_l1_mask:
+                            l1_mask = 1 - torch.t(model.prototype_class_identity_2[c]).cuda()
+                            l1_class = (model.last_layer_heads[c].weight * l1_mask).norm(p=1)
+                        else:
+                            l1_class = model.last_layer_heads[c].weight.norm(p=1)
+                    l1 += l1_class
+                    l1 /= model.num_classes
+
                 else:
-                    l1 = model.last_layer.weight.norm(p=1)
+                    if use_l1_mask:
+                        l1_mask = 1 - torch.t(model.prototype_class_identity).cuda()
+                        l1 = (model.last_layer.weight * l1_mask).norm(p=1)
+                    else:
+                        l1 = model.last_layer.weight.norm(p=1)
 
             else:
                 min_distance, _ = torch.min(min_distances, dim=1)
@@ -110,11 +149,19 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
             n_examples += target.size(0)
             n_correct += (predicted == target).sum().item()
 
-            pred_s = func.softmax(output, dim=-1)
-            preds.append(pred_s.data.cpu().numpy())
             targets.append(target.cpu().numpy())
 
-            conf_matrix += confusion_matrix(target.cpu().numpy(), predicted.cpu().numpy(), labels=[0, 1])
+            if multilabel:
+                probs = torch.sigmoid(output.data)
+                predicted = torch.where(probs >= 0.3, 1, 0).cpu().numpy()  # todo: choose threshold
+                # predicted = torch.round(probs).cpu().numpy()
+                target = target.cpu().numpy()
+                preds.append(probs.detach().cpu())
+                conf_matrix += multilabel_confusion_matrix(target, predicted)
+            else:
+                pred_s = func.softmax(output, dim=-1)
+                preds.append(pred_s.data.cpu().numpy())
+                conf_matrix += confusion_matrix(target.cpu().numpy(), predicted.cpu().numpy(), labels=[0, 1])
 
             n_batches += 1
             total_cross_entropy += cross_entropy.item()
@@ -122,6 +169,9 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
             total_separation_cost += separation_cost.item()
             total_avg_separation_cost += avg_separation_cost.item()
 
+        # bces.append(cross_entropy.item())
+        # cl_csts.append(cluster_cost.item())
+        # sep_csts.append(separation_cost.item())
         # compute gradient and do SGD step
         if config.class_specific:
             loss = (config.coef_crs_ent * cross_entropy
@@ -150,12 +200,21 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     total_separation_cost /= n_batches
     total_loss /= n_batches
 
+    # print(" -------- BCE:", np.mean(bces))
+    # print(" ---- Cluster:", np.mean(cl_csts))
+    # print(" -------- Sep:", np.mean(sep_csts))
+
     preds = np.concatenate(preds)
     targets = np.concatenate(targets)
-    auc = roc_auc_score(targets, preds[..., 1])
+    if not multilabel:
+        auc = roc_auc_score(targets, preds[..., 1])
 
-    print('\t\taccuracy:', n_correct / n_examples)
-    print('\t\tauc:', auc)
+    if multilabel:
+        print('\t\tAP:', average_precision_score(targets, preds, average=None))
+        print('\t\tmAP:', average_precision_score(targets, preds))
+    else:
+        print('\t\taccuracy:', n_correct / n_examples)
+        print('\t\tauc:', auc)
     print('\t\ttotal_loss:', total_loss)
 
     suffix = '/train' if is_train else '/test'
@@ -169,12 +228,24 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
             log_writer.add_scalar('separation_cost' + suffix, total_separation_cost, global_step=step)
             log_writer.add_scalar('avg_separation_cost' + suffix, total_avg_separation_cost / n_batches,
                                   global_step=step)
+        if multilabel:
+            log_writer.add_scalar('mAP' + suffix, average_precision_score(targets, preds), global_step=step)
+            for i in range(20):
+                conf_plot = ConfusionMatrixDisplay(confusion_matrix=conf_matrix[i]).plot(cmap='Blues', values_format='d')
+                nr = '_' + str(i+1)
+                log_writer.add_figure('confusion_matrix' + nr + suffix, conf_plot.figure_, global_step=step, close=True)
+        else:
+            log_writer.add_scalar('accuracy' + suffix, n_correct / n_examples, global_step=step)
+            log_writer.add_scalar('auc' + suffix, auc, global_step=step)
+            conf_plot = ConfusionMatrixDisplay(confusion_matrix=conf_matrix[0]).plot(cmap='Blues', values_format='d')
+            log_writer.add_figure('confusion_matrix' + suffix, conf_plot.figure_, global_step=step, close=True)
 
-        log_writer.add_scalar('accuracy' + suffix, n_correct / n_examples, global_step=step)
-        log_writer.add_scalar('auc' + suffix, auc, global_step=step)
-        log_writer.add_scalar('l1' + suffix, model.last_layer.weight.norm(p=1).item(), global_step=step)
-        conf_plot = ConfusionMatrixDisplay(confusion_matrix=conf_matrix).plot(cmap='Blues', values_format='d')
-        log_writer.add_figure('confusion_matrix' + suffix, conf_plot.figure_, global_step=step, close=True)
+    if multilabel:
+        l1 = 0
+        for c in range(model.num_classes):
+            l1 += model.last_layer_heads[c].weight.norm(p=1).item()
+        l1 /= model.num_classes
+    log_writer.add_scalar('l1' + suffix, l1, global_step=step)
 
     p = model.prototype_vectors.view(model.num_prototypes, -1).cpu()
     with torch.no_grad():
@@ -183,24 +254,25 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     if log_writer:
         log_writer.add_scalar('p_avg_pair_dist' + suffix, p_avg_pair_dist, global_step=step)
 
+    if multilabel:
+        return average_precision_score(targets, preds)
     return n_correct / n_examples
 
 
-def train(model, dataloader, optimizer, config: Settings, log_writer: SummaryWriter = None,
-          step: int = 0):
+def train(model, dataloader, optimizer, config: Settings, log_writer: SummaryWriter = None, step: int = 0, multilabel=False):
     assert (optimizer is not None)
 
     print('\ttrain')
     model.train()
-    return _train_or_test(model=model, dataloader=dataloader, config=config, optimizer=optimizer,
-                          log_writer=log_writer, step=step)
+    return _train_or_test(model=model, dataloader=dataloader, config=config, optimizer=optimizer, log_writer=log_writer,
+                          step=step, multilabel=multilabel)
 
 
-def test(model, dataloader, config: Settings, log_writer: SummaryWriter = None, step: int = 0):
+def test(model, dataloader, config: Settings, log_writer: SummaryWriter = None, step: int = 0, multilabel=False):
     print('\ttest')
     model.eval()
     return _train_or_test(model=model, dataloader=dataloader, config=config, optimizer=None,
-                          log_writer=log_writer, step=step)
+                          log_writer=log_writer, step=step, multilabel=multilabel)
 
 
 def _freeze_layer(layer):
@@ -219,32 +291,71 @@ def last_only(model):
 
     model.prototype_vectors.requires_grad = False
 
-    _unfreeze_layer(model.attention_V)
-    _unfreeze_layer(model.attention_U)
-    _unfreeze_layer(model.attention_weights)
-    _unfreeze_layer(model.last_layer)
+    if model.multilabel:
+        for attention_head, last_layer_head in zip(model.attention_heads, model.last_layer_heads):
+            _freeze_layer(attention_head.attention_V)
+            _freeze_layer(attention_head.attention_U)
+            _freeze_layer(attention_head.attention_weights)
+
+            _unfreeze_layer(last_layer_head)
+    else:
+        _freeze_layer(model.attention_V)
+        _freeze_layer(model.attention_U)
+        _freeze_layer(model.attention_weights)
+
+        _unfreeze_layer(model.last_layer)
 
 
 def warm_only(model):
-    _unfreeze_layer(model.features)
+    _freeze_layer(model.features)
     _unfreeze_layer(model.add_on_layers)
-
-    _unfreeze_layer(model.attention_V)
-    _unfreeze_layer(model.attention_U)
-    _unfreeze_layer(model.attention_weights)
 
     model.prototype_vectors.requires_grad = True
 
-    _unfreeze_layer(model.last_layer)
+    if model.multilabel:
+        for attention_head, last_layer_head in zip(model.attention_heads, model.last_layer_heads):
+            _unfreeze_layer(attention_head.attention_V)
+            _unfreeze_layer(attention_head.attention_U)
+            _unfreeze_layer(attention_head.attention_weights)
+
+            _freeze_layer(last_layer_head)
+    else:
+        _unfreeze_layer(model.attention_V)
+        _unfreeze_layer(model.attention_U)
+        _unfreeze_layer(model.attention_weights)
+
+        _freeze_layer(model.last_layer)
 
 
 def joint(model):
-    _unfreeze_layer(model.features)
+    _freeze_layer(model.features)
     _unfreeze_layer(model.add_on_layers)
 
     model.prototype_vectors.requires_grad = True
 
-    _freeze_layer(model.attention_V)
-    _freeze_layer(model.attention_U)
-    _freeze_layer(model.attention_weights)
-    _freeze_layer(model.last_layer)
+    if model.multilabel:
+        for attention_head, last_layer_head in zip(model.attention_heads, model.last_layer_heads):
+            _unfreeze_layer(attention_head.attention_V)
+            _unfreeze_layer(attention_head.attention_U)
+            _unfreeze_layer(attention_head.attention_weights)
+
+            _freeze_layer(last_layer_head)
+    else:
+        _unfreeze_layer(model.attention_V)
+        _unfreeze_layer(model.attention_U)
+        _unfreeze_layer(model.attention_weights)
+
+        _freeze_layer(model.last_layer)
+
+
+# def warm_only(model):
+#     _unfreeze_layer(model.features)
+#     _unfreeze_layer(model.add_on_layers)
+#
+#     _unfreeze_layer(model.attention_V)
+#     _unfreeze_layer(model.attention_U)
+#     _unfreeze_layer(model.attention_weights)
+#
+#     model.prototype_vectors.requires_grad = True
+#
+#     _unfreeze_layer(model.last_layer)

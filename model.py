@@ -60,7 +60,7 @@ class PPNet(nn.Module):
     def __init__(self, features, img_size, prototype_shape,
                  proto_layer_rf_info, num_classes, init_weights=True,
                  prototype_activation_function='log',
-                 add_on_layers_type='bottleneck', mil_pooling='gated_attention'):
+                 add_on_layers_type='bottleneck', mil_pooling='gated_attention', multilabel=True):
 
         super(PPNet, self).__init__()
         self.img_size = img_size
@@ -143,28 +143,51 @@ class PPNet(nn.Module):
         self.D = prototype_shape[0] // 2
         self.K = 1
 
-        self.attention_V = nn.Sequential(
-            nn.Linear(self.L, self.D),
-            nn.Tanh()
-        )
+        if multilabel:
+            self.attention_heads = nn.ModuleList()
+            self.last_layer_heads = nn.ModuleList()
 
-        self.attention_U = nn.Sequential(
-            nn.Linear(self.L, self.D),
-            nn.Sigmoid()
-        )
+            for i in range(num_classes):
+                attention_V = nn.Sequential(
+                    nn.Linear(self.L, self.D),
+                    nn.Tanh()
+                )
+                attention_U = nn.Sequential(
+                    nn.Linear(self.L, self.D),
+                    nn.Sigmoid()
+                )
+                attention_weights = nn.Linear(self.D, self.K)
+                last_layer = nn.Linear(self.num_prototypes, 2, bias=False)  # do not use bias
+                attention_head = nn.ModuleDict({'attention_V': attention_V,
+                                                'attention_U': attention_U,
+                                                'attention_weights': attention_weights})
+                self.attention_heads.append(attention_head)
+                self.last_layer_heads.append(last_layer)
 
-        self.attention_weights = nn.Linear(self.D, self.K)
+        else:
+            self.attention_V = nn.Sequential(
+                nn.Linear(self.L, self.D),
+                nn.Tanh()
+            )
+
+            self.attention_U = nn.Sequential(
+                nn.Linear(self.L, self.D),
+                nn.Sigmoid()
+            )
+
+            self.attention_weights = nn.Linear(self.D, self.K)
+
+            self.last_layer = nn.Linear(self.num_prototypes, self.num_classes,
+                                        bias=False)  # do not use bias
+
+        self.multilabel = multilabel
+        if init_weights:
+            self._initialize_weights()
 
         # do not make this just a tensor,
         # since it will not be moved automatically to gpu
         self.ones = nn.Parameter(torch.ones(self.prototype_shape),
                                  requires_grad=False)
-
-        self.last_layer = nn.Linear(self.num_prototypes, self.num_classes,
-                                    bias=False)  # do not use bias
-
-        if init_weights:
-            self._initialize_weights()
 
         self.mil_pooling = mil_pooling
         if mil_pooling == 'loss_attention':
@@ -258,26 +281,45 @@ class PPNet(nn.Module):
 
         A = torch.ones((1, prototype_activations.shape[0])) / prototype_activations.shape[0]
         out_c = None
-        if self.mil_pooling == 'gated_attention':
-            A_V = self.attention_V(prototype_activations)  # NxD
-            A_U = self.attention_U(prototype_activations)  # NxD
-            A = self.attention_weights(A_V * A_U)  # element wise multiplication # NxK
-            A = torch.transpose(A, 1, 0)  # KxN
-            A = F.softmax(A, dim=1)  # softmax over N
-            M = torch.mm(A, prototype_activations)  # KxL
-        elif self.mil_pooling == 'average':
-            M = torch.mean(prototype_activations, dim=0, keepdim=True)
-        elif self.mil_pooling == 'max':
-            M = torch.amax(prototype_activations, dim=0, keepdim=True)
-        elif self.mil_pooling == 'min':
-            M = torch.amin(prototype_activations, dim=0, keepdim=True)
-        elif self.mil_pooling == 'loss_attention':
-            M, out_c, A = self.loss_attention(prototype_activations, self.last_layer.weight, self.last_layer.bias)
-            M = M.mean(0, keepdim=True)
-        else:
-            raise NotImplementedError()
 
-        logits = self.last_layer(M)
+        if self.multilabel:
+            attention = []
+            logits = []
+            for attention_head, last_layer_head in zip(self.attention_heads, self.last_layer_heads):
+                A_V = attention_head.attention_V(prototype_activations)  # NxD
+                A_U = attention_head.attention_U(prototype_activations)  # NxD
+                A = attention_head.attention_weights(A_V * A_U)  # element wise multiplication # NxK
+                A = torch.transpose(A, 1, 0)  # KxN
+                A = F.softmax(A, dim=1)  # softmax over N
+                M = torch.mm(A, prototype_activations)  # KxL
+
+                prob = F.softmax(last_layer_head(M), dim=1)[:, 1]
+                logits.append(prob)
+                attention.append(A)
+            logits = torch.stack(logits).T
+            A = attention
+
+        else:
+            if self.mil_pooling == 'gated_attention':
+                    A_V = self.attention_V(prototype_activations)  # NxD
+                    A_U = self.attention_U(prototype_activations)  # NxD
+                    A = self.attention_weights(A_V * A_U)  # element wise multiplication # NxK
+                    A = torch.transpose(A, 1, 0)  # KxN
+                    A = F.softmax(A, dim=1)  # softmax over N
+                    M = torch.mm(A, prototype_activations)  # KxL
+            elif self.mil_pooling == 'average':
+                M = torch.mean(prototype_activations, dim=0, keepdim=True)
+            elif self.mil_pooling == 'max':
+                M = torch.amax(prototype_activations, dim=0, keepdim=True)
+            elif self.mil_pooling == 'min':
+                M = torch.amin(prototype_activations, dim=0, keepdim=True)
+            elif self.mil_pooling == 'loss_attention':
+                M, out_c, A = self.loss_attention(prototype_activations, self.last_layer.weight, self.last_layer.bias)
+                M = M.mean(0, keepdim=True)
+            else:
+                raise NotImplementedError()
+
+            logits = self.last_layer(M)
 
         self.out_c = out_c
         self.A = A
@@ -348,14 +390,38 @@ class PPNet(nn.Module):
         '''
         the incorrect strength will be actual strength if -0.5 then input -0.5
         '''
-        positive_one_weights_locations = torch.t(self.prototype_class_identity)
-        negative_one_weights_locations = 1 - positive_one_weights_locations
-
         correct_class_connection = 1
         incorrect_class_connection = incorrect_strength
-        self.last_layer.weight.data.copy_(
-            correct_class_connection * positive_one_weights_locations
-            + incorrect_class_connection * negative_one_weights_locations)
+
+        if self.multilabel:
+            self.prototype_class_identity_2 = []
+            for c in range(self.num_classes):
+                # for every class c compute
+                # a onehot indication matrix for each prototype's "class" identity
+                # (1=positive if prototype is from class c, otherwise 0=negative)
+                prototype_class_identity = torch.zeros(self.num_prototypes, 2)
+
+                num_prototypes_per_class = self.num_prototypes // self.num_classes
+                prototype_class_identity[c * num_prototypes_per_class: (c + 1) * num_prototypes_per_class, 1] = 1 # positive
+                prototype_class_identity[:c * num_prototypes_per_class, 0] = 1        # negative
+                prototype_class_identity[(c + 1) * num_prototypes_per_class:, 0] = 1  # negative
+
+                self.prototype_class_identity_2.append(prototype_class_identity)
+
+                positive_one_weights_locations = torch.t(prototype_class_identity)
+                negative_one_weights_locations = 1 - positive_one_weights_locations
+
+                self.last_layer_heads[c].weight.data.copy_(
+                        correct_class_connection * positive_one_weights_locations
+                        + incorrect_class_connection * negative_one_weights_locations)
+
+        else:
+            positive_one_weights_locations = torch.t(self.prototype_class_identity)
+            negative_one_weights_locations = 1 - positive_one_weights_locations
+
+            self.last_layer.weight.data.copy_(
+                correct_class_connection * positive_one_weights_locations
+                + incorrect_class_connection * negative_one_weights_locations)
 
     def _initialize_weights(self):
         for m in self.add_on_layers.modules():
@@ -378,7 +444,7 @@ def construct_PPNet(base_architecture, pretrained=True, img_size=224,
                     prototype_shape=(2000, 512, 1, 1), num_classes=200,
                     prototype_activation_function='log',
                     add_on_layers_type='bottleneck',
-                    batch_norm_features=True, mil_pooling='gated_attention'):
+                    batch_norm_features=True, mil_pooling='gated_attention', multilabel=True):
     features = base_architecture_to_features[base_architecture](pretrained=pretrained, batch_norm=batch_norm_features)
     layer_filter_sizes, layer_strides, layer_paddings = features.conv_info()
     proto_layer_rf_info = compute_proto_layer_rf_info_v2(img_size=img_size,
@@ -394,4 +460,5 @@ def construct_PPNet(base_architecture, pretrained=True, img_size=224,
                  init_weights=True,
                  prototype_activation_function=prototype_activation_function,
                  add_on_layers_type=add_on_layers_type,
-                 mil_pooling=mil_pooling)
+                 mil_pooling=mil_pooling,
+                 multilabel=multilabel)

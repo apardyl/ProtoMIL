@@ -165,7 +165,7 @@ def find_k_nearest_patches_to_prototypes(dataloader,  # pytorch dataloader (must
                 # save the original image where the patch comes from
                 plt.imsave(fname=os.path.join(dir_for_saving_images,
                                               'nearest-' + str(i + 1) + '_original.png'),
-                           arr=patch.original_img,
+                           arr=patch.original_img.clip(0, 1),
                            vmin=0.0,
                            vmax=1.0)
 
@@ -182,7 +182,7 @@ def find_k_nearest_patches_to_prototypes(dataloader,  # pytorch dataloader (must
                 overlayed_original_img = 0.5 * patch.original_img + 0.3 * heatmap
                 plt.imsave(fname=os.path.join(dir_for_saving_images,
                                               'nearest-' + str(i + 1) + '_original_with_heatmap.png'),
-                           arr=overlayed_original_img,
+                           arr=overlayed_original_img.clip(0, 1),
                            vmin=0.0,
                            vmax=1.0)
 
@@ -193,7 +193,7 @@ def find_k_nearest_patches_to_prototypes(dataloader,  # pytorch dataloader (must
                             patch.patch_indices)
                     plt.imsave(fname=os.path.join(dir_for_saving_images,
                                                   'nearest-' + str(i + 1) + '_receptive_field.png'),
-                               arr=patch.patch,
+                               arr=patch.patch.clip(0, 1),
                                vmin=0.0,
                                vmax=1.0)
                     # save the receptive field patch with heatmap
@@ -201,7 +201,7 @@ def find_k_nearest_patches_to_prototypes(dataloader,  # pytorch dataloader (must
                                       patch.patch_indices[2]:patch.patch_indices[3], :]
                     plt.imsave(fname=os.path.join(dir_for_saving_images,
                                                   'nearest-' + str(i + 1) + '_receptive_field_with_heatmap.png'),
-                               arr=overlayed_patch,
+                               arr=overlayed_patch.clip(0, 1),
                                vmin=0.0,
                                vmax=1.0)
 
@@ -214,7 +214,7 @@ def find_k_nearest_patches_to_prototypes(dataloader,  # pytorch dataloader (must
                         high_act_patch_indices)
                 plt.imsave(fname=os.path.join(dir_for_saving_images,
                                               'nearest-' + str(i + 1) + '_high_act_patch.png'),
-                           arr=high_act_patch,
+                           arr=high_act_patch.clip(0, 1),
                            vmin=0.0,
                            vmax=1.0)
                 # save the original image with bounding box showing high activation patch

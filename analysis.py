@@ -8,14 +8,15 @@ from torch.utils.tensorboard import SummaryWriter
 
 import find_nearest
 from datasets.mnist_dataset import MnistBags
+from datasets.pascal_dataset import PascalBags
 from helpers import makedir
 from model import construct_PPNet
 from save import load_model_from_train_state
-from settings import MNIST_SETTINGS
+from settings import MNIST_SETTINGS, PASCAL_SETTINGS
 
 
 def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader, epoch,
-                                         model_dir, device, bag_class=0, N=10):
+                                         model_dir, device, bag_class=0, N=10, multilabel=False):
     print('    analysis for class', bag_class)
     epoch_number_str = str(epoch)
     load_img_dir = os.path.join(model_dir, 'img')
@@ -28,9 +29,14 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     # print('Prototypes are chosen from ' + str(len(set(prototype_img_identity))) + ' number of classes.')
     # print('Their class identities are: ' + str(prototype_img_identity))
 
-    bag, label = next(((b, l) for b, l in iter(test_dataloader) if l.max().unsqueeze(0) == bag_class))
-    
-    count_positive_patches = sum(label)
+    if multilabel:
+        bag, label = next(((b, l) for b, l in iter(test_dataloader) if l[bag_class] == 1))
+        label = torch.as_tensor(bag_class).unsqueeze(0)
+        count_positive_patches = 'unknown'
+    else:
+        bag, label = next(((b, l) for b, l in iter(test_dataloader) if l.max().unsqueeze(0) == bag_class))
+        count_positive_patches = sum(label)
+
     if len(label) > 1:
         label = label.max().unsqueeze(0)
     
@@ -50,19 +56,20 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
         if ppnet.prototype_activation_function == 'linear':
             prototype_activation_patterns = prototype_activation_patterns + max_dist
 
-        tables = []
-        for i in range(logits.size(0)):
-            tables.append((torch.argmax(logits, dim=1)[i].item(), labels_test[i].item()))
-            # print(str(i) + ' ' + str(tables[-1]))
+        if not multilabel:
+            tables = []
+            for i in range(logits.size(0)):
+                tables.append((torch.argmax(logits, dim=1)[i].item(), labels_test[i].item()))
+                # print(str(i) + ' ' + str(tables[-1]))
 
-        idx = 0
-        predicted_cls = tables[idx][0]
-        correct_cls = tables[idx][1]
-        # print('Predicted: ' + str(predicted_cls))
-        # print('Actual: ' + str(correct_cls))
+            idx = 0
+            predicted_cls = tables[idx][0]
+            correct_cls = tables[idx][1]
+            # print('Predicted: ' + str(predicted_cls))
+            # print('Actual: ' + str(correct_cls))
 
     # Take the N patches with the most attention
-    at = attention.squeeze(0).detach().cpu().numpy()
+    at = attention[bag_class].squeeze(0).detach().cpu().numpy()
     top_patches = at.argsort()[-N:][::-1]
     # print(f'        patch indexes: {top_patches}')
 
@@ -77,7 +84,7 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
         # for every prototype
         for i in range(len(prototype_img_identity)):
             activation_pattern = prototype_activation_patterns[idx][i].detach().cpu().numpy()
-            upsampled_activation_pattern = cv2.resize(activation_pattern, dsize=(28, 28),
+            upsampled_activation_pattern = cv2.resize(activation_pattern, dsize=(original_img.shape[0], original_img.shape[1]),
                                                     interpolation=cv2.INTER_CUBIC)
 
             rescaled_activation_pattern = upsampled_activation_pattern - np.amin(upsampled_activation_pattern)
@@ -90,6 +97,8 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
             self_activation_for_img.append(np.asarray(overlayed_img))
 
         imgs_with_self_activation_by_prototype.append(np.asarray(self_activation_for_img))
+
+    original_img_size = [original_img.shape[0], original_img.shape[1]]
 
     ### Take prototypes
 
@@ -151,6 +160,8 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     right = left + width
     top = bottom + height
 
+    print('creating plots')
+
     # histogram
     l = 0
     for j in range(3 + k, 2 * N + 3 + k, 2):
@@ -173,8 +184,8 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     for j in range(2 + k, 2 * N + 2 + k, 2):
         for i in range(2, len_proto + 2):
             main_ax = fig.add_subplot(grid[i, j])
-            main_ax.set_xlim([0, 27])
-            main_ax.set_ylim([0, 27])
+            main_ax.set_xlim([0, original_img_size[0]])
+            main_ax.set_ylim([0, original_img_size[1]])
             main_ax.invert_yaxis()
             main_ax.imshow(imgs_with_self_activation_by_prototype[l][i - 2], aspect='auto')
 
@@ -192,14 +203,18 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
         main_ax.get_yaxis().set_visible(False)
 
     # prototypes images with activation
+    if not multilabel:
+        bag_class = 1
+    prototypes_per_class = int(ppnet.num_prototypes / ppnet.num_classes)
+    positive_prototypes = range((bag_class)*prototypes_per_class, (bag_class+1)*prototypes_per_class)
     for i in range(2, len_proto + 2):
         main_ax = fig.add_subplot(grid[i, 0 + k])
-        main_ax.set_xlim([0, 27])
-        main_ax.set_ylim([0, 27])
+        main_ax.set_xlim([0, original_img_size[0]])
+        main_ax.set_ylim([0, original_img_size[1]])
         main_ax.invert_yaxis()
         main_ax.imshow(prototypes_img_with_act[i - 2])
 
-        if i - 2 < len_proto // 2:
+        if not (i - 2) in positive_prototypes:  # < len_proto // 2:
             main_ax.patch.set_edgecolor('red')
         else:
             main_ax.patch.set_edgecolor('green')
@@ -212,8 +227,8 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     for j in range(k):
         for i in range(2, len_proto + 2):
             main_ax = fig.add_subplot(grid[i, j])
-            main_ax.set_xlim([0, 27])
-            main_ax.set_ylim([0, 27])
+            main_ax.set_xlim([0, original_img_size[0]])
+            main_ax.set_ylim([0, original_img_size[1]])
             main_ax.invert_yaxis()
             main_ax.imshow(k_nearest_patches[i - 2][j])
 
@@ -224,8 +239,8 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     l = 0
     for i in range(2 + k, 2 * N + 2 + k, 2):
         main_ax = fig.add_subplot(grid[0:2, i:i + 2])
-        main_ax.set_xlim([0, 27])
-        main_ax.set_ylim([0, 27])
+        main_ax.set_xlim([0, original_img_size[0]])
+        main_ax.set_ylim([0, original_img_size[1]])
         main_ax.invert_yaxis()
         main_ax.set_title(f'{at[top_patches[l]]:.3f}', fontsize=25)
         main_ax.imshow(imgs[l], aspect='auto')
@@ -238,18 +253,22 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     return fig
 
 
+import os
+
+
 if __name__ == '__main__':
     # %%
 
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     device = torch.device('cuda')
 
     # %%
 
-    config = MNIST_SETTINGS
+    config = PASCAL_SETTINGS # MNIST_SETTINGS
 
-    load_model_dir = 'saved_models/mnist.vulcan.2021-03-16T16:42:33.070310'  # 50
+    load_model_dir = 'saved_models/pascal.plaster.2021-05-11T04:37:29' # 'saved_models/mnist.vulcan.2021-03-16T16:42:33.070310'  # 50
 
-    load_model_name = '20.push.best.57.94.00.pck'
+    load_model_name = '2.push.best.103.8.29.pck'
 
     load_model_path = os.path.join(load_model_dir, load_model_name)
 
@@ -266,8 +285,10 @@ if __name__ == '__main__':
     print('load model from ' + load_model_path)
     load_model_from_train_state(load_model_path, ppnet)
 
-    ds_test = MnistBags(train=False, bag_length_mean=50, bag_length_std=2, positive_samples_in_bag_ratio_mean=0.1,
-                        positive_samples_in_bag_ratio_std=0.02)
+    # ds_test = MnistBags(train=False, bag_length_mean=50, bag_length_std=2, positive_samples_in_bag_ratio_mean=0.1,
+    #     #                     positive_samples_in_bag_ratio_std=0.02)
+
+    ds_test = PascalBags(train=False)
 
     test_loader = torch.utils.data.DataLoader(
         ds_test, batch_size=None,
@@ -275,7 +296,8 @@ if __name__ == '__main__':
         num_workers=0,
         pin_memory=False)
 
-    ds_push = MnistBags(train=True, push=True)
+    # ds_push = MnistBags(train=True, push=True)
+    ds_push = PascalBags(train=True, push=True)
 
     push_loader = torch.utils.data.DataLoader(
         ds_push, batch_size=None,
@@ -283,5 +305,7 @@ if __name__ == '__main__':
         num_workers=0,
         pin_memory=False)
 
-    fig = generate_prototype_activation_matrix(ppnet, test_loader, push_loader, 20, load_model_dir, device, bag_class=1)
-    plt.show()
+    fig = generate_prototype_activation_matrix(ppnet, test_loader, push_loader, 2, load_model_dir, device, bag_class=13,
+                                               multilabel=True)
+    # plt.show()
+    plt.savefig('matrix13.png')

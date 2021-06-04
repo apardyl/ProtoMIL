@@ -24,8 +24,8 @@ class Settings:
 
     num_classes: int = 2
     coef_crs_ent: float = 1
-    coef_clst: float = 0.8
-    coef_sep: float = -0.08
+    coef_clst: float = 0.45 #1 #0.8   # 37.13 # 74.25  # 0.8
+    coef_sep: float = -0.05 #-1 #-0.08   #-11.37 # -22.73  # -0.08
     coef_l1: float = 1e-4
 
     prototype_activation_function: str = 'log'
@@ -64,7 +64,7 @@ class Settings:
 
     @property
     def prototype_shape(self):
-        return self.prototype_number, self.prototype_latent, *self.prototype_conv_dim
+        return self.prototype_number, self.prototype_latent, self.prototype_conv_dim[0], self.prototype_conv_dim[1]
 
     @property
     def dataset_settings(self):
@@ -157,4 +157,36 @@ COLON_CANCER_SETTINGS = Settings(
     num_last_layer_iterations=20,
     push_start=10,
     push_epochs=[i for i in range(200) if i % 10 == 0]
+)
+
+PASCAL_SETTINGS = Settings(
+    base_architecture='resnet18',
+    img_size=224,
+    prototype_number=20*5,  # 20 classes, 5 prototypes per class
+    prototype_latent=128,
+    prototype_conv_dim=(1, 1),
+    num_classes=20,
+    loss_function='binary_cross_entropy',
+    joint_optimizer_lrs={
+        'features': 1e-4,
+        'add_on_layers': 3e-3,
+        'prototype_vectors': 3e-3,
+    },
+    joint_lr_step_size=5,
+    warm_optimizer_lrs={
+        # 'features': 1e-3,
+        'add_on_layers': 3e-3,
+        'prototype_vectors': 3e-3,
+        # 'attention': 1e-3,
+        # 'last_layer': 1e-3,
+    },
+    last_layer_optimizer_lr={
+        'attention': 1e-3,
+        'last_layer': 1e-4,
+    },
+    num_train_epochs=1000,
+    num_warm_epochs=20, # 5,
+    num_last_layer_iterations=20,
+    push_start=40,
+    push_epochs=[i for i in range(1000) if i % 20 == 0]
 )

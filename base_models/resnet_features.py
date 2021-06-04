@@ -28,28 +28,33 @@ class BasicBlock(nn.Module):
     expansion = 1
     num_layers = 2
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, batch_norm=False):
         super(BasicBlock, self).__init__()
         # only conv with possibly not 1 stride
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes)
+
+        if batch_norm:
+            self.bn1 = nn.BatchNorm2d(planes)
+            self.bn2 = nn.BatchNorm2d(planes)
 
         # if stride is not 1 then self.downsample cannot be None
         self.downsample = downsample
         self.stride = stride
+        self.batch_norm = batch_norm
 
     def forward(self, x):
         identity = x
 
         out = self.conv1(x)
-        out = self.bn1(out)
+        if self.batch_norm:
+            out = self.bn1(out)
         out = self.relu(out)
 
         out = self.conv2(out)
-        out = self.bn2(out)
+        if self.batch_norm:
+            out = self.bn2(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -73,34 +78,40 @@ class Bottleneck(nn.Module):
     expansion = 4
     num_layers = 3
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, batch_norm=False):
         super(Bottleneck, self).__init__()
         self.conv1 = conv1x1(inplanes, planes)
-        self.bn1 = nn.BatchNorm2d(planes)
         # only conv with possibly not 1 stride
         self.conv2 = conv3x3(planes, planes, stride)
-        self.bn2 = nn.BatchNorm2d(planes)
         self.conv3 = conv1x1(planes, planes * self.expansion)
-        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
+
+        if batch_norm:
+            self.bn1 = nn.BatchNorm2d(planes)
+            self.bn2 = nn.BatchNorm2d(planes)
+            self.bn3 = nn.BatchNorm2d(planes * self.expansion)
 
         # if stride is not 1 then self.downsample cannot be None
         self.downsample = downsample
         self.stride = stride
+        self.batch_norm = batch_norm
 
     def forward(self, x):
         identity = x
 
         out = self.conv1(x)
-        out = self.bn1(out)
+        if self.batch_norm:
+            out = self.bn1(out)
         out = self.relu(out)
 
         out = self.conv2(out)
-        out = self.bn2(out)
+        if self.batch_norm:
+            out = self.bn2(out)
         out = self.relu(out)
 
         out = self.conv3(out)
-        out = self.bn3(out)
+        if self.batch_norm:
+            out = self.bn3(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -124,15 +135,18 @@ class ResNet_features(nn.Module):
     the average pooling and final fully convolutional layer is removed
     '''
 
-    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False):
+    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False, batch_norm=False):
         super(ResNet_features, self).__init__()
 
         self.inplanes = 64
 
+        self.batch_norm = batch_norm
+
         # the first convolutional layer before the structured sequence of blocks
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        if batch_norm:
+            self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         # comes from the first conv and the following max pool
@@ -193,7 +207,8 @@ class ResNet_features(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.bn1(x)
+        if self.batch_norm:
+            x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
 

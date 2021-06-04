@@ -20,7 +20,8 @@ def push_prototypes(push_dataloader,  # pytorch dataloader
                     prototype_self_act_filename_prefix=None,
                     proto_bound_boxes_filename_prefix=None,
                     save_prototype_class_identity=True,  # which class the prototype image comes from
-                    prototype_activation_function_in_numpy=None):
+                    prototype_activation_function_in_numpy=None,
+                    multilabel=False):
     prototype_network_parallel.eval()
     print('\tpush')
 
@@ -89,7 +90,8 @@ def push_prototypes(push_dataloader,  # pytorch dataloader
                                    dir_for_saving_prototypes=proto_epoch_dir,
                                    prototype_img_filename_prefix=prototype_img_filename_prefix,
                                    prototype_self_act_filename_prefix=prototype_self_act_filename_prefix,
-                                   prototype_activation_function_in_numpy=prototype_activation_function_in_numpy)
+                                   prototype_activation_function_in_numpy=prototype_activation_function_in_numpy,
+                                   multilabel=multilabel)
 
     if proto_epoch_dir != None and proto_bound_boxes_filename_prefix != None:
         np.save(os.path.join(proto_epoch_dir,
@@ -121,11 +123,15 @@ def update_prototypes_on_batch(search_batch_raw,
                                dir_for_saving_prototypes=None,
                                prototype_img_filename_prefix=None,
                                prototype_self_act_filename_prefix=None,
-                               prototype_activation_function_in_numpy=None):
+                               prototype_activation_function_in_numpy=None,
+                               multilabel=False):
     prototype_network_parallel.eval()
 
-    # Use bag y as batch y
-    search_y = search_y.repeat(search_batch_raw.shape[0])
+    # propagate bag label for every patch in the bag
+    if multilabel:
+        search_y = search_y.unsqueeze(0).repeat((search_batch_raw.shape[0], 1))
+    else:
+        search_y = search_y.repeat(search_batch_raw.shape[0])
 
     with torch.no_grad():
         search_batch_preprocessed = search_batch_preprocessed.cuda()
@@ -141,8 +147,13 @@ def update_prototypes_on_batch(search_batch_raw,
         class_to_img_index_dict = {key: [] for key in range(num_classes)}
         # img_y is the image's integer label
         for img_index, img_y in enumerate(search_y):
-            img_label = img_y.item()
-            class_to_img_index_dict[img_label].append(img_index)
+            if multilabel:
+                for img_label, l in enumerate(img_y):
+                    if l == 1:
+                        class_to_img_index_dict[img_label].append(img_index)
+            else:
+                img_label = img_y.item()
+                class_to_img_index_dict[img_label].append(img_index)
 
     prototype_shape = prototype_network_parallel.prototype_shape
     n_prototypes = prototype_shape[0]
@@ -216,7 +227,10 @@ def update_prototypes_on_batch(search_batch_raw,
             proto_rf_boxes[j, 3] = rf_prototype_j[3]
             proto_rf_boxes[j, 4] = rf_prototype_j[4]
             if proto_rf_boxes.shape[1] == 6 and search_y is not None:
-                proto_rf_boxes[j, 5] = search_y[rf_prototype_j[0]].item()
+                if multilabel:
+                    proto_rf_boxes[j, 5] = target_class  # check if it is correct
+                else:
+                    proto_rf_boxes[j, 5] = search_y[rf_prototype_j[0]].item()
 
             # find the highly activated region of the original image
             proto_dist_img_j = proto_dist_[img_index_in_batch, j, :, :]
@@ -241,7 +255,10 @@ def update_prototypes_on_batch(search_batch_raw,
             proto_bound_boxes[j, 3] = proto_bound_j[2]
             proto_bound_boxes[j, 4] = proto_bound_j[3]
             if proto_bound_boxes.shape[1] == 6 and search_y is not None:
-                proto_bound_boxes[j, 5] = search_y[rf_prototype_j[0]].item()
+                if multilabel:
+                    proto_bound_boxes[j, 5] = target_class  # check if it is correct
+                else:
+                    proto_bound_boxes[j, 5] = search_y[rf_prototype_j[0]].item()
 
             if dir_for_saving_prototypes is not None:
                 if prototype_self_act_filename_prefix is not None:
@@ -251,9 +268,11 @@ def update_prototypes_on_batch(search_batch_raw,
                             proto_act_img_j)
                 if prototype_img_filename_prefix is not None:
                     # save the whole image containing the prototype as png
+                    if 0 > np.min(original_img_j) or 1 < np.max(original_img_j):
+                        print(np.min(original_img_j), np.max(original_img_j))
                     plt.imsave(os.path.join(dir_for_saving_prototypes,
                                             prototype_img_filename_prefix + '-original' + str(j) + '.png'),
-                               original_img_j,
+                               original_img_j.clip(0, 1),
                                vmin=0.0,
                                vmax=1.0)
                     # overlay (upsampled) self activation on original image and save the result
@@ -266,7 +285,7 @@ def update_prototypes_on_batch(search_batch_raw,
                     plt.imsave(os.path.join(dir_for_saving_prototypes,
                                             prototype_img_filename_prefix + '-original_with_self_act' + str(
                                                 j) + '.png'),
-                               overlayed_original_img_j,
+                               overlayed_original_img_j.clip(0, 1),
                                vmin=0.0,
                                vmax=1.0)
 
@@ -275,7 +294,7 @@ def update_prototypes_on_batch(search_batch_raw,
                         plt.imsave(os.path.join(dir_for_saving_prototypes,
                                                 prototype_img_filename_prefix + '-receptive_field' + str(
                                                     j) + '.png'),
-                                   rf_img_j,
+                                   rf_img_j.clip(0, 1),
                                    vmin=0.0,
                                    vmax=1.0)
                         overlayed_rf_img_j = overlayed_original_img_j[rf_prototype_j[1]:rf_prototype_j[2],
@@ -283,14 +302,14 @@ def update_prototypes_on_batch(search_batch_raw,
                         plt.imsave(os.path.join(dir_for_saving_prototypes,
                                                 prototype_img_filename_prefix + '-receptive_field_with_self_act' + str(
                                                     j) + '.png'),
-                                   overlayed_rf_img_j,
+                                   overlayed_rf_img_j.clip(0, 1),
                                    vmin=0.0,
                                    vmax=1.0)
 
                     # save the prototype image (highly activated region of the whole image)
                     plt.imsave(os.path.join(dir_for_saving_prototypes,
                                             prototype_img_filename_prefix + str(j) + '.png'),
-                               proto_img_j,
+                               proto_img_j.clip(0, 1),
                                vmin=0.0,
                                vmax=1.0)
 

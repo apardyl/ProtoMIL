@@ -1,3 +1,7 @@
+import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ['CUDA_VISIBLE_DEVICES'] = '1' #str(args.gpuid)
+
 import argparse
 import datetime
 import getpass
@@ -15,12 +19,13 @@ from torchinfo import summary
 from analysis import generate_prototype_activation_matrix
 from datasets.colon_dataset import ColonCancerBagsCross
 from datasets.mnist_dataset import MnistBags
+from datasets.pascal_dataset import PascalBags
 from helpers import makedir, str2bool
 from model import construct_PPNet
 from push import push_prototypes
 from save import load_train_state, save_train_state, get_state_path_for_prefix, snapshot_code, \
     load_config_from_train_state
-from settings import COLON_CANCER_SETTINGS, MNIST_SETTINGS, Settings
+from settings import COLON_CANCER_SETTINGS, MNIST_SETTINGS, PASCAL_SETTINGS, Settings
 from train_and_test import warm_only, train, joint, test, last_only, TrainMode
 
 matplotlib.use('Agg')
@@ -39,7 +44,7 @@ CHECKPOINT_FREQUENCY_STEPS = 3
 # noinspection PyTypeChecker
 parser = argparse.ArgumentParser(prog='', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('-g', '--gpuid', type=int, default=0, help='CUDA device id to use')
-parser.add_argument('-d', '--dataset', type=str, required=True, choices=['mnist', 'colon_cancer'],
+parser.add_argument('-d', '--dataset', type=str, required=True, choices=['mnist', 'colon_cancer', 'pascal'],
                     help='Select dataset')
 parser.add_argument('-n', '--new_experiment', default=False, action='store_true',
                     help='Overwrite any saved state and start a new experiment (saved checkpoint will be lost)')
@@ -79,9 +84,11 @@ if config is None:
     config = {
         'colon_cancer': COLON_CANCER_SETTINGS,
         'mnist': MNIST_SETTINGS,
+        'pascal': PASCAL_SETTINGS,
     }[args.dataset]
 
-os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0' #str(args.gpuid)
 print('CUDA available:', torch.cuda.is_available())
 
 if args.alloc:
@@ -120,10 +127,23 @@ if args.dataset == 'colon_cancer':
                                    push=True, shuffle_bag=True)
     ds_test = ColonCancerBagsCross(path="data/ColonCancer", train=False, train_val_idxs=train_range,
                                    test_idxs=test_range)
+    multilabel = False
+    pretrained = False
+
 elif args.dataset == 'mnist':
     ds = MnistBags(train=True, seed=seed, **config.dataset_settings)
     ds_push = MnistBags(train=True, push=True, seed=seed, **config.dataset_settings)
     ds_test = MnistBags(train=False, seed=seed, **config.dataset_settings, all_labels=True)
+    multilabel = False
+    pretrained = False
+
+elif args.dataset == 'pascal':
+    ds = PascalBags(train=True)
+    ds_push = PascalBags(train=True, push=True)
+    ds_test = PascalBags(train=False)
+    multilabel = True
+    pretrained = True
+
 else:
     raise NotImplementedError()
 
@@ -132,86 +152,124 @@ print('training set size: {}, push set size: {}, test set size: {}'.format(
     len(ds), len(ds_push), len(ds_test)))
 
 ppnet = construct_PPNet(base_architecture=config.base_architecture,
-                        pretrained=False, img_size=config.img_size,
+                        pretrained=pretrained, img_size=config.img_size,
                         prototype_shape=config.prototype_shape,
                         num_classes=config.num_classes,
                         prototype_activation_function=config.prototype_activation_function,
                         add_on_layers_type=config.add_on_layers_type,
                         batch_norm_features=config.batch_norm_features,
-                        mil_pooling=config.mil_pooling)
+                        mil_pooling=config.mil_pooling,
+                        multilabel=multilabel)
 ppnet = ppnet.cuda()
 
 summary(ppnet, (10, 3, config.img_size, config.img_size), col_names=("input_size", "output_size", "num_params"),
         depth=4)
 
-joint_optimizer_specs = [
-    {
-        'params': ppnet.features.parameters(),
-        'lr': config.joint_optimizer_lrs['features'],
-        'weight_decay': 1e-3
-    },
-    {
-        'params': ppnet.add_on_layers.parameters(),
-        'lr': config.joint_optimizer_lrs['add_on_layers'],
-        'weight_decay': 1e-3
-    },
-    {
-        'params': ppnet.prototype_vectors,
-        'lr': config.joint_optimizer_lrs['prototype_vectors']
-    }
-]
+if multilabel:
+    joint_optimizer_specs = [
+        # {
+        #     'params': ppnet.features.parameters(),
+        #     'lr': config.joint_optimizer_lrs['features'],
+        #     'weight_decay': 1e-3
+        # },
+        {
+            'params': ppnet.add_on_layers.parameters(),
+            'lr': config.joint_optimizer_lrs['add_on_layers'],
+            'weight_decay': 1e-3
+        },
+        {
+            'params': ppnet.prototype_vectors,
+            'lr': config.joint_optimizer_lrs['prototype_vectors']
+        },
+        {
+            'params': ppnet.attention_heads.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        }
+    ]
 
-warm_optimizer_specs = [
-    {
-        'params': ppnet.features.parameters(),
-        'lr': config.joint_optimizer_lrs['features'],
-        'weight_decay': 1e-3
-    },
-    {
-        'params': ppnet.add_on_layers.parameters(),
-        'lr': config.warm_optimizer_lrs['add_on_layers'],
-        'weight_decay': 1e-3
-    },
-    {
-        'params': ppnet.prototype_vectors,
-        'lr': config.warm_optimizer_lrs['prototype_vectors']
-    },
-    {
-        'params': ppnet.last_layer.parameters(),
-        'lr': config.last_layer_optimizer_lr['last_layer']
-    },
-    {
-        'params': ppnet.attention_V.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_U.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_weights.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    }
-]
+    warm_optimizer_specs = [
+        {
+            'params': ppnet.add_on_layers.parameters(),
+            'lr': config.warm_optimizer_lrs['add_on_layers'],
+            'weight_decay': 1e-3
+        },
+        {
+            'params': ppnet.prototype_vectors,
+            'lr': config.warm_optimizer_lrs['prototype_vectors']
+        },
+        {
+            'params': ppnet.attention_heads.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        }
+    ]
 
-last_layer_optimizer_specs = [
-    {
-        'params': ppnet.last_layer.parameters(),
-        'lr': config.last_layer_optimizer_lr['last_layer']
-    },
-    {
-        'params': ppnet.attention_V.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_U.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_weights.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    }
-]
+    last_layer_optimizer_specs = [
+        {
+            'params': ppnet.last_layer_heads.parameters(),
+            'lr': config.last_layer_optimizer_lr['last_layer']
+        }
+    ]
+
+else:
+    joint_optimizer_specs = [
+        # {
+        #     'params': ppnet.features.parameters(),
+        #     'lr': config.joint_optimizer_lrs['features'],
+        #     'weight_decay': 1e-3
+        # },
+        {
+            'params': ppnet.add_on_layers.parameters(),
+            'lr': config.joint_optimizer_lrs['add_on_layers'],
+            'weight_decay': 1e-3
+        },
+        {
+            'params': ppnet.prototype_vectors,
+            'lr': config.joint_optimizer_lrs['prototype_vectors']
+        },
+        {
+            'params': ppnet.attention_V.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        },
+        {
+            'params': ppnet.attention_U.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        },
+        {
+            'params': ppnet.attention_weights.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        }
+    ]
+
+    warm_optimizer_specs = [
+        {
+            'params': ppnet.add_on_layers.parameters(),
+            'lr': config.warm_optimizer_lrs['add_on_layers'],
+            'weight_decay': 1e-3
+        },
+        {
+            'params': ppnet.prototype_vectors,
+            'lr': config.warm_optimizer_lrs['prototype_vectors']
+        },
+        {
+            'params': ppnet.attention_V.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        },
+        {
+            'params': ppnet.attention_U.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        },
+        {
+            'params': ppnet.attention_weights.parameters(),
+            'lr': config.last_layer_optimizer_lr['attention']
+        }
+    ]
+
+    last_layer_optimizer_specs = [
+        {
+            'params': ppnet.last_layer.parameters(),
+            'lr': config.last_layer_optimizer_lr['last_layer']
+        }
+    ]
 
 joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
 joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=config.joint_lr_step_size, gamma=0.1)
@@ -313,6 +371,7 @@ push_model_state_epoch = None
 #     ppnet.mil_pooling = 'average'
 #     print('\tattention disabled')
 
+
 # training loop as a state machine.
 while True:
     print('step: {}, mode: {}, epoch: {}, iteration: {}'.format(step, mode.name, epoch, iteration))
@@ -320,8 +379,9 @@ while True:
         write_mode(TrainMode.WARM, log_writer, step)
         warm_only(model=ppnet)
         train(model=ppnet, dataloader=train_loader, optimizer=warm_optimizer, config=config, log_writer=log_writer,
-              step=step)
-        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step)
+              step=step, multilabel=multilabel)
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+                    multilabel=multilabel)
         push_model_state_epoch = None
         epoch += 1
         if epoch >= config.num_warm_epochs:
@@ -330,9 +390,10 @@ while True:
         write_mode(TrainMode.JOINT, log_writer, step)
         joint(model=ppnet)
         train(model=ppnet, dataloader=train_loader, optimizer=joint_optimizer, config=config, log_writer=log_writer,
-              step=step)
+              step=step, multilabel=multilabel)
         joint_lr_scheduler.step()
-        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step)
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+                    multilabel=multilabel)
         push_model_state_epoch = None
         if epoch >= config.push_start and epoch in config.push_epochs:
             mode = TrainMode.PUSH
@@ -351,8 +412,10 @@ while True:
             prototype_img_filename_prefix=prototype_img_filename_prefix,
             prototype_self_act_filename_prefix=prototype_self_act_filename_prefix,
             proto_bound_boxes_filename_prefix=proto_bound_boxes_filename_prefix,
-            save_prototype_class_identity=True)
-        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step)
+            save_prototype_class_identity=True,
+            multilabel=multilabel)
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+                    multilabel=multilabel)
         push_model_state_epoch = epoch
         current_push_best_accu = 0.
         if config.mil_pooling == 'gated_attention' and not ppnet.mil_pooling == 'gated_attention':
@@ -368,19 +431,32 @@ while True:
         write_mode(TrainMode.LAST_ONLY, log_writer, step)
         last_only(model=ppnet)
         train(model=ppnet, dataloader=train_loader, optimizer=last_layer_optimizer, config=config,
-              log_writer=log_writer, step=step)
-        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step)
+              log_writer=log_writer, step=step, multilabel=multilabel)
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+                    multilabel=multilabel)
         iteration += 1
         push_model_state_epoch = epoch
         if iteration >= config.num_last_layer_iterations:
-            log_writer.add_figure('prototype_analysis/positive',
-                                  generate_prototype_activation_matrix(ppnet, test_loader, train_push_loader, epoch,
-                                                                       model_dir, torch.device('cuda'), bag_class=1)
-                                  , global_step=step)
-            log_writer.add_figure('prototype_analysis/negative',
-                                  generate_prototype_activation_matrix(ppnet, test_loader, train_push_loader, epoch,
-                                                                       model_dir, torch.device('cuda'), bag_class=0)
-                                  , global_step=step)
+            if multilabel:
+                if epoch > 300:
+                    for bag_class in range(ppnet.num_classes):
+                        log_writer.add_figure('prototype_analysis/class' + str(bag_class),
+                                              generate_prototype_activation_matrix(ppnet, test_loader, train_push_loader,
+                                                                                   epoch, model_dir, torch.device('cuda'),
+                                                                                   bag_class=bag_class,
+                                                                                   multilabel=multilabel)
+                                              , global_step=step)
+            else:
+                log_writer.add_figure('prototype_analysis/positive',
+                                      generate_prototype_activation_matrix(ppnet, test_loader, train_push_loader, epoch,
+                                                                           model_dir, torch.device('cuda'), bag_class=1,
+                                                                           multilabel=multilabel)
+                                      , global_step=step)
+                log_writer.add_figure('prototype_analysis/negative',
+                                      generate_prototype_activation_matrix(ppnet, test_loader, train_push_loader, epoch,
+                                                                           model_dir, torch.device('cuda'), bag_class=0,
+                                                                           multilabel=multilabel)
+                                      , global_step=step)
             iteration = None
             epoch += 1
             mode = TrainMode.JOINT
