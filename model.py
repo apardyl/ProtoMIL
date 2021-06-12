@@ -157,7 +157,7 @@ class PPNet(nn.Module):
                     nn.Sigmoid()
                 )
                 attention_weights = nn.Linear(self.D, self.K)
-                last_layer = nn.Linear(self.num_prototypes, 2, bias=False)  # do not use bias
+                last_layer = nn.Linear(self.num_prototypes, 1, bias=False)  # do not use bias
                 attention_head = nn.ModuleDict({'attention_V': attention_V,
                                                 'attention_U': attention_U,
                                                 'attention_weights': attention_weights})
@@ -293,10 +293,11 @@ class PPNet(nn.Module):
                 A = F.softmax(A, dim=1)  # softmax over N
                 M = torch.mm(A, prototype_activations)  # KxL
 
-                prob = F.softmax(last_layer_head(M), dim=1)[:, 1]
-                logits.append(prob)
+                logit = last_layer_head(M)   # F.sigmoid(last_layer_head(M))
+                logits.append(logit)
                 attention.append(A)
             logits = torch.stack(logits).T
+            logits = logits.squeeze(dim=0)
             A = attention
 
         else:
@@ -318,7 +319,6 @@ class PPNet(nn.Module):
                 M = M.mean(0, keepdim=True)
             else:
                 raise NotImplementedError()
-
             logits = self.last_layer(M)
 
         self.out_c = out_c
@@ -399,12 +399,12 @@ class PPNet(nn.Module):
                 # for every class c compute
                 # a onehot indication matrix for each prototype's "class" identity
                 # (1=positive if prototype is from class c, otherwise 0=negative)
-                prototype_class_identity = torch.zeros(self.num_prototypes, 2)
+                prototype_class_identity = torch.zeros(self.num_prototypes, 1)
 
                 num_prototypes_per_class = self.num_prototypes // self.num_classes
-                prototype_class_identity[c * num_prototypes_per_class: (c + 1) * num_prototypes_per_class, 1] = 1 # positive
-                prototype_class_identity[:c * num_prototypes_per_class, 0] = 1        # negative
-                prototype_class_identity[(c + 1) * num_prototypes_per_class:, 0] = 1  # negative
+                prototype_class_identity[c * num_prototypes_per_class: (c + 1) * num_prototypes_per_class, 0] = 1 # positive
+                # prototype_class_identity[:c * num_prototypes_per_class, 0] = 1        # negative
+                # prototype_class_identity[(c + 1) * num_prototypes_per_class:, 0] = 1  # negative
 
                 self.prototype_class_identity_2.append(prototype_class_identity)
 

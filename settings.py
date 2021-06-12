@@ -24,8 +24,8 @@ class Settings:
 
     num_classes: int = 2
     coef_crs_ent: float = 1
-    coef_clst: float = 0.45 #1 #0.8   # 37.13 # 74.25  # 0.8
-    coef_sep: float = -0.05 #-1 #-0.08   #-11.37 # -22.73  # -0.08
+    coef_clst: float = 0.8   #0.45 #1 #0.8   # 37.13 # 74.25  # 0.8
+    coef_sep: float = -0.08   #-0.05 #-1 #-0.08   #-11.37 # -22.73  # -0.08
     coef_l1: float = 1e-4
 
     prototype_activation_function: str = 'log'

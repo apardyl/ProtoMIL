@@ -28,6 +28,7 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     dataloader:
     optimizer: if None, will be test evaluation
     '''
+    batch_size = 1  # 16
     is_train = optimizer is not None
     n_examples = 0
     n_correct = 0
@@ -50,12 +51,23 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     elif config.loss_function == 'focal':
         loss_fn = FocalLoss(alpha=0.5, gamma=2)
     elif config.loss_function == 'binary_cross_entropy':
-        loss_fn = torch.nn.BCELoss(reduction='none')
+        loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     else:
         raise NotImplementedError('unknown loss function: ' + config.loss_function)
 
+    if is_train:
+        optimizer.zero_grad()
+
+    n_bags = len(dataloader)
+    n_batches = n_bags // batch_size
+    batches = [batch_size for i in range(n_batches)]
+    if n_bags % batch_size:
+        batches.append(n_bags % batch_size)
+        n_batches += 1
+
     for i, (image, label) in enumerate(dataloader):
         input = image.cuda()
+        current_batch_size = batches[i // batch_size]
 
         if not multilabel and len(label) > 1:
             label = label.max()
@@ -153,7 +165,7 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
             if multilabel:
                 probs = torch.sigmoid(output.data)
-                predicted = torch.where(probs >= 0.3, 1, 0).cpu().numpy()  # todo: choose threshold
+                predicted = torch.where(probs >= 0.5, 1, 0).cpu().numpy()  # todo: select threshold
                 # predicted = torch.round(probs).cpu().numpy()
                 target = target.cpu().numpy()
                 preds.append(probs.detach().cpu())
@@ -163,11 +175,11 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
                 preds.append(pred_s.data.cpu().numpy())
                 conf_matrix += confusion_matrix(target.cpu().numpy(), predicted.cpu().numpy(), labels=[0, 1])
 
-            n_batches += 1
-            total_cross_entropy += cross_entropy.item()
-            total_cluster_cost += cluster_cost.item()
-            total_separation_cost += separation_cost.item()
-            total_avg_separation_cost += avg_separation_cost.item()
+            # n_batches += 1
+            total_cross_entropy += cross_entropy.item() / current_batch_size
+            total_cluster_cost += cluster_cost.item() / current_batch_size
+            total_separation_cost += separation_cost.item() / current_batch_size
+            total_avg_separation_cost += avg_separation_cost.item() / current_batch_size
 
         # bces.append(cross_entropy.item())
         # cl_csts.append(cluster_cost.item())
@@ -182,12 +194,14 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
             loss = (config.coef_crs_ent * cross_entropy
                     + config.coef_clst * cluster_cost
                     + config.coef_l1 * l1)
-        total_loss += loss.item()
+        total_loss += loss.item() / current_batch_size
         if is_train:
-            optimizer.zero_grad()
+            loss /= current_batch_size
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5) # gradient clipping
-            optimizer.step()
+            if (i+1) % batch_size == 0 or (i+1) == len(dataloader):
+                optimizer.step()
+                optimizer.zero_grad()
 
         del input
         del target
@@ -199,6 +213,7 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
     total_cluster_cost /= n_batches
     total_separation_cost /= n_batches
     total_loss /= n_batches
+    total_avg_separation_cost /= n_batches
 
     # print(" -------- BCE:", np.mean(bces))
     # print(" ---- Cluster:", np.mean(cl_csts))
@@ -226,11 +241,11 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
         if config.class_specific:
             log_writer.add_scalar('separation_cost' + suffix, total_separation_cost, global_step=step)
-            log_writer.add_scalar('avg_separation_cost' + suffix, total_avg_separation_cost / n_batches,
+            log_writer.add_scalar('avg_separation_cost' + suffix, total_avg_separation_cost,
                                   global_step=step)
         if multilabel:
             log_writer.add_scalar('mAP' + suffix, average_precision_score(targets, preds), global_step=step)
-            for i in range(20):
+            for i in range(model.num_classes):
                 conf_plot = ConfusionMatrixDisplay(confusion_matrix=conf_matrix[i]).plot(cmap='Blues', values_format='d')
                 nr = '_' + str(i+1)
                 log_writer.add_figure('confusion_matrix' + nr + suffix, conf_plot.figure_, global_step=step, close=True)
