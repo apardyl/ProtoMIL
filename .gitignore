@@ -1,5 +1,6 @@
 saved_models/
 data/
+data2/
 runs/
 checkpoint.*
 experiments/
