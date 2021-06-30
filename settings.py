@@ -206,3 +206,35 @@ BREAST_CANCER_SETTINGS = Settings(
     push_start=60,
     push_epochs=[i for i in range(200) if i % 20 == 0]
 )
+
+MESSIDOR_SETTINGS = Settings(
+    base_architecture='resnet18',
+    img_size=224,
+    prototype_number=20,
+    prototype_latent=128,
+    prototype_conv_dim=(1, 1),
+    joint_optimizer_lrs={
+        'features': 1e-5,
+        'add_on_layers': 1e-5,
+        'prototype_vectors': 1e-5,
+    },
+    joint_lr_step_size=10,
+    joint_lr_gamma=0.1,
+    warm_optimizer_lrs={
+        'features': 1e-2,
+        'add_on_layers': 1e-2,
+        'prototype_vectors': 1e-2,
+        'attention': 1e-2,
+        'last_layer': 1e-2,
+    },
+    warm_lr_gamma=0.95,
+    last_layer_optimizer_lr={
+        'attention': 1e-3,
+        'last_layer': 1e-4,
+    },
+    num_train_epochs=201,
+    num_warm_epochs=4,
+    num_last_layer_iterations=2,
+    push_start=4,
+    push_epochs=[i for i in range(200) if i % 2 == 0]
+)
