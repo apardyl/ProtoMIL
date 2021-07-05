@@ -13,6 +13,15 @@ from model import construct_PPNet
 from save import load_model_from_train_state
 from settings import MNIST_SETTINGS
 
+def inverse_normalize(tensor, mean=(89.7121552586411, 89.7121552586411, 89.7121552586411), std=(18.49568745464706, 15.415668522447366, 11.147622232506315)):
+    mean = torch.as_tensor(mean, dtype=tensor.dtype, device=tensor.device)
+    std = torch.as_tensor(std, dtype=tensor.dtype, device=tensor.device)
+    if mean.ndim == 1:
+        mean = mean.view(-1, 1, 1)
+    if std.ndim == 1:
+        std = std.view(-1, 1, 1)
+    tensor.mul_(std).add_(mean)
+    return tensor
 
 def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader, epoch,
                                          model_dir, device, bag_class=0, N=10):
@@ -66,7 +75,7 @@ def generate_prototype_activation_matrix(ppnet, test_dataloader, push_dataloader
     top_patches = at.argsort()[-N:][::-1]
     # print(f'        patch indexes: {top_patches}')
 
-    imgs = [bag[i].permute(1, 2, 0) for i in top_patches]
+    imgs = [inverse_normalize(bag[i]).permute(1, 2, 0) for i in top_patches]
 
     # Take the most highly activated area of the image by prototype
     imgs_with_self_activation_by_prototype = []
