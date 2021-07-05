@@ -17,8 +17,8 @@ from torchvision.transforms import Compose
 from torchvision.transforms import Normalize
 from torchvision.transforms import ToTensor
 
-normalization_mean = [89.7121552586411, 89.7121552586411, 89.7121552586411]
-normalization_std = [18.49568745464706, 15.415668522447366, 11.147622232506315]
+normalization_mean = [89.7121552586411/255, 89.7121552586411/255, 89.7121552586411/255]
+normalization_std = [18.49568745464706/255, 15.415668522447366/255, 11.147622232506315/255]
 
 
 class DiabeticRetinopathyDataset(Dataset):
@@ -79,7 +79,6 @@ class DiabeticRetinopathyDataset(Dataset):
         bag_tensors = []
         for img in bag:
             bag_tensors.append(img_transform(img))
-
         return torch.stack(bag_tensors)
 
     def __len__(self):

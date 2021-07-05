@@ -87,8 +87,8 @@ if config is None:
         'messidor': MESSIDOR_SETTINGS
     }[args.dataset]
 
-os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
-print('CUDA available:', torch.cuda.is_available())
+# os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
+# print('CUDA available:', torch.cuda.is_available())
 
 if args.alloc:
     mem_holder = torch.randint(0, 1, size=(args.alloc * 1024 * 1024 // 8,), dtype=torch.int64,
@@ -155,7 +155,7 @@ print('training set size: {}, push set size: {}, valid set size: {}, test set si
     len(ds), len(ds_push), len(ds_valid), len(ds_test)))
 
 ppnet = construct_PPNet(base_architecture=config.base_architecture,
-                        pretrained=True, img_size=config.img_size,
+                        pretrained=False, img_size=config.img_size,
                         prototype_shape=config.prototype_shape,
                         num_classes=config.num_classes,
                         prototype_activation_function=config.prototype_activation_function,
@@ -466,7 +466,7 @@ for i in config.push_epochs:
             path_to_model_with_max_push_acc = model_push_path
 
 ppnet_test = construct_PPNet(base_architecture=config.base_architecture,
-                             pretrained=True,
+                             pretrained=False,
                              img_size=config.img_size,
                              prototype_shape=config.prototype_shape,
                              num_classes=config.num_classes,
