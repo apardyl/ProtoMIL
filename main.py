@@ -137,10 +137,10 @@ elif args.dataset == 'breast_cancer':
 elif args.dataset == 'messidor':
     path_to_patch_csv = '/shared/sets/datasets/vision/messidor/retina_patches/patches.csv'
     path_to_train_labels_csv = '/shared/sets/datasets/vision/messidor/messidor_scaled_700x700/trainLabels.csv'
-    ds = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True)
-    ds_push = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, push=True)
-    ds_valid = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False)
-    ds_test = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False, test=True)
+    ds = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
+    ds_push = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, push=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
+    ds_valid = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False, fold_id=config.fold_id, folds=config.folds, random_state=seed)
+    ds_test = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False, test=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
 
 elif args.dataset == 'mnist':
     ds = MnistBags(train=True, random_state=seed, **config.dataset_settings)
@@ -155,7 +155,7 @@ print('training set size: {}, push set size: {}, valid set size: {}, test set si
     len(ds), len(ds_push), len(ds_valid), len(ds_test)))
 
 ppnet = construct_PPNet(base_architecture=config.base_architecture,
-                        pretrained=False, img_size=config.img_size,
+                        pretrained=True, img_size=config.img_size,
                         prototype_shape=config.prototype_shape,
                         num_classes=config.num_classes,
                         prototype_activation_function=config.prototype_activation_function,
@@ -184,11 +184,11 @@ joint_optimizer_specs = [
 ]
 
 warm_optimizer_specs = [
-    {
-        'params': ppnet.features.parameters(),
-        'lr': config.joint_optimizer_lrs['features'],
-        'weight_decay': 1e-3
-    },
+    # {
+    #     'params': ppnet.features.parameters(),
+    #     'lr': config.joint_optimizer_lrs['features'],
+    #     'weight_decay': 1e-3
+    # },
     {
         'params': ppnet.add_on_layers.parameters(),
         'lr': config.warm_optimizer_lrs['add_on_layers'],
@@ -198,22 +198,22 @@ warm_optimizer_specs = [
         'params': ppnet.prototype_vectors,
         'lr': config.warm_optimizer_lrs['prototype_vectors']
     },
-    {
-        'params': ppnet.last_layer.parameters(),
-        'lr': config.last_layer_optimizer_lr['last_layer']
-    },
-    {
-        'params': ppnet.attention_V.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_U.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    },
-    {
-        'params': ppnet.attention_weights.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
-    }
+    # {
+    #     'params': ppnet.last_layer.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['last_layer']
+    # },
+    # {
+    #     'params': ppnet.attention_V.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # },
+    # {
+    #     'params': ppnet.attention_U.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # },
+    # {
+    #     'params': ppnet.attention_weights.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # }
 ]
 
 last_layer_optimizer_specs = [
@@ -466,7 +466,7 @@ for i in config.push_epochs:
             path_to_model_with_max_push_acc = model_push_path
 
 ppnet_test = construct_PPNet(base_architecture=config.base_architecture,
-                             pretrained=False,
+                             pretrained=True,
                              img_size=config.img_size,
                              prototype_shape=config.prototype_shape,
                              num_classes=config.num_classes,
