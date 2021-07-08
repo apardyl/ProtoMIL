@@ -379,7 +379,7 @@ def construct_PPNet(base_architecture, pretrained=True, img_size=224,
                     prototype_activation_function='log',
                     add_on_layers_type='bottleneck',
                     batch_norm_features=True, mil_pooling='gated_attention'):
-    features = base_architecture_to_features[base_architecture](pretrained=pretrained)
+    features = base_architecture_to_features[base_architecture](pretrained=pretrained, batch_norm=batch_norm_features)
     layer_filter_sizes, layer_strides, layer_paddings = features.conv_info()
     proto_layer_rf_info = compute_proto_layer_rf_info_v2(img_size=img_size,
                                                          layer_filter_sizes=layer_filter_sizes,
