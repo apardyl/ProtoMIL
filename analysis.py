@@ -13,7 +13,10 @@ from model import construct_PPNet
 from save import load_model_from_train_state
 from settings import MNIST_SETTINGS
 
-def inverse_normalize(tensor, mean=(89.7121552586411/255, 89.7121552586411/255, 89.7121552586411/255), std=(18.49568745464706/255, 15.415668522447366/255, 11.147622232506315/255)):
+normalization_mean = [144.33171767592685/255, 67.48043553767825/255, 22.65431090601474/255]
+normalization_std = [26.823169068307216/255, 16.366394611772588/255, 7.449466376062873/255]
+
+def inverse_normalize(tensor, mean=normalization_mean, std=normalization_std):
     mean = torch.as_tensor(mean, dtype=tensor.dtype, device=tensor.device)
     std = torch.as_tensor(std, dtype=tensor.dtype, device=tensor.device)
     if mean.ndim == 1:

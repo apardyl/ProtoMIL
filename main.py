@@ -137,8 +137,8 @@ elif args.dataset == 'breast_cancer':
 elif args.dataset == 'messidor':
     path_to_patch_csv = '/shared/sets/datasets/vision/messidor/retina_patches/patches.csv'
     path_to_train_labels_csv = '/shared/sets/datasets/vision/messidor/messidor_scaled_700x700/trainLabels.csv'
-    ds = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
-    ds_push = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, push=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
+    ds = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, shuffle_bag=True, data_augmentation=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
+    ds_push = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=True, push=True, shuffle_bag=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
     ds_valid = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False, fold_id=config.fold_id, folds=config.folds, random_state=seed)
     ds_test = DiabeticRetinopathyDataset(path_to_patch_csv, path_to_train_labels_csv, train=False, test=True, fold_id=config.fold_id, folds=config.folds, random_state=seed)
 
@@ -170,6 +170,11 @@ summary(ppnet, (10, 3, config.img_size, config.img_size), col_names=("input_size
 
 warm_optimizer_specs = [
     {
+        'params': ppnet.features.parameters(),
+        'lr': config.joint_optimizer_lrs['features'],
+        'weight_decay': 1e-3
+    },
+    {
         'params': ppnet.add_on_layers.parameters(),
         'lr': config.warm_optimizer_lrs['add_on_layers'],
         'weight_decay': 1e-3
@@ -193,7 +198,7 @@ warm_optimizer_specs = [
 ]
 
 warm_optimizer = torch.optim.Adam(warm_optimizer_specs)
-#warm_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(warm_optimizer, gamma=config.warm_lr_gamma)
+warm_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(warm_optimizer, gamma=config.warm_lr_gamma)
 
 joint_optimizer_specs = [
     {
@@ -209,6 +214,28 @@ joint_optimizer_specs = [
     {
         'params': ppnet.prototype_vectors,
         'lr': config.joint_optimizer_lrs['prototype_vectors']
+    }
+    # {
+    #     'params': ppnet.attention_V.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # },
+    # {
+    #     'params': ppnet.attention_U.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # },
+    # {
+    #     'params': ppnet.attention_weights.parameters(),
+    #     'lr': config.last_layer_optimizer_lr['attention']
+    # }
+]
+
+joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
+joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=config.joint_lr_step_size,
+                                                     gamma=config.joint_lr_gamma)
+last_layer_optimizer_specs = [
+    {
+        'params': ppnet.last_layer.parameters(),
+        'lr': config.last_layer_optimizer_lr['last_layer']
     },
     {
         'params': ppnet.attention_V.parameters(),
@@ -221,16 +248,6 @@ joint_optimizer_specs = [
     {
         'params': ppnet.attention_weights.parameters(),
         'lr': config.last_layer_optimizer_lr['attention']
-    }
-]
-
-joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
-joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=config.joint_lr_step_size,
-                                                     gamma=config.joint_lr_gamma)
-last_layer_optimizer_specs = [
-    {
-        'params': ppnet.last_layer.parameters(),
-        'lr': config.last_layer_optimizer_lr['last_layer']
     }
 ]
 
@@ -344,9 +361,13 @@ while True:
         warm_only(model=ppnet)
         train(model=ppnet, dataloader=train_loader, optimizer=warm_optimizer, config=config, log_writer=log_writer,
               step=step, weighting_attention=args.weighting_attention)
-        #warm_lr_scheduler.step()
+        warm_lr_scheduler.step()
         accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
                      weighting_attention=args.weighting_attention)
+
+        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+            weighting_attention=args.weighting_attention)
+
         push_model_state_epoch = None
         epoch += 1
         if epoch >= config.push_start and epoch in config.push_epochs:
@@ -361,6 +382,10 @@ while True:
         joint_lr_scheduler.step()
         accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
                      weighting_attention=args.weighting_attention)
+
+        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+            weighting_attention=args.weighting_attention)
+
         push_model_state_epoch = None
         if epoch >= config.push_start and epoch in config.push_epochs:
             mode = TrainMode.PUSH
@@ -382,6 +407,10 @@ while True:
             save_prototype_class_identity=True)
         accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
                      weighting_attention=args.weighting_attention)
+
+        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+            weighting_attention=args.weighting_attention)
+
         push_model_state_epoch = epoch
         current_push_best_accu = 0.
         if config.mil_pooling == 'gated_attention' and not ppnet.mil_pooling == 'gated_attention':
@@ -400,6 +429,10 @@ while True:
               log_writer=log_writer, step=step, weighting_attention=args.weighting_attention)
         accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
                      weighting_attention=args.weighting_attention)
+
+        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+            weighting_attention=args.weighting_attention)
+
         iteration += 1
         push_model_state_epoch = epoch
         if iteration >= config.num_last_layer_iterations:
@@ -473,7 +506,7 @@ load_model_from_train_state(path_to_model_with_max_push_acc, ppnet_test)
 
 ppnet_test = ppnet_test.cuda()
 
-accu = test(model=ppnet_test, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+accu = test(model=ppnet_test, dataloader=test_loader, config=config, log_writer=log_writer, step=step+1,
             weighting_attention=args.weighting_attention)
 
 epoch_for_ppnet_test = path_to_model_with_max_push_acc.split(".")[-7].split("/")[-1]

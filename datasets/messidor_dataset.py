@@ -6,20 +6,24 @@ import cv2
 import torch
 from PIL import Image
 from PIL import ImageFile
+from torchvision.transforms.transforms import RandomVerticalFlip, ToPILImage
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import utils_augemntation
 from typing import List
 from torch.utils.data import Dataset
 from sklearn.model_selection import KFold
+import utils_augemntation
+import torchvision.transforms as transforms
 
+from torch.utils.data import Dataset
+from typing import List, Callable, Optional
 
-from torchvision.transforms import Compose
-from torchvision.transforms import Normalize
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor, Normalize, Compose
 
-normalization_mean = [89.7121552586411/255, 89.7121552586411/255, 89.7121552586411/255]
-normalization_std = [18.49568745464706/255, 15.415668522447366/255, 11.147622232506315/255]
+normalization_mean = [144.33171767592685/255, 67.48043553767825/255, 22.65431090601474/255]
+normalization_std = [26.823169068307216/255, 16.366394611772588/255, 7.449466376062873/255]
 
+TRANSFORMS = Compose([ToTensor(), Normalize(mean=normalization_mean, std=normalization_std)])
 
 class DiabeticRetinopathyDataset(Dataset):
     def __init__(self, patches_file, label_file, train=True, test=False, shuffle_bag=False,
@@ -40,12 +44,19 @@ class DiabeticRetinopathyDataset(Dataset):
         
         self.r = np.random.RandomState(random_state)
         
-        tr = [ToTensor(),
-                Normalize(mean=normalization_mean, std=normalization_std)
-              ]
-        tst = [ToTensor(),
-                Normalize(mean=normalization_mean, std=normalization_std)
-               ]
+        tr = [
+            ToPILImage(),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            # GaussianNoise,
+            ToTensor(),
+            # RotationMultiple90(),
+            Normalize(mean=normalization_mean, std=normalization_std)
+            ]
+        tst = [
+            ToTensor(),
+            Normalize(mean=normalization_mean, std=normalization_std)
+            ]
 
         psh = [ToTensor()]
         
@@ -107,3 +118,53 @@ class DiabeticRetinopathyDataset(Dataset):
                 labels.append(label)
                 bags.append(curr_bag)
         return bags, labels
+
+class RotationMultiple90:
+    """Rotation counterclockwise by multiplier of 90 degree."""
+
+    def __init__(self, multiplier: int = 1):
+        """Initializes rotation by a specified multiplier of 90 degrees.
+
+        Args:
+            multiplier: multiplier of 90 degree rotation, default 1."""
+        self.multiplier = multiplier
+
+    def __call__(self, array: np.ndarray, multiplier: Optional[int] = None) -> np.ndarray:
+        """Rotates array counterclockwise by 90 degree with specified multiplier.
+
+        Args:
+            array: array to be rotated.
+            multiplier (optional): overwrites the multiplier set on initialization.
+
+        Returns:
+            Copy of counterclockwise rotated array."""
+        if multiplier:
+            self.multiplier = multiplier
+        return np.rot90(array, self.multiplier, (0, 1)).copy()
+
+
+class GaussianNoise():
+    """Gaussian noise operation."""
+
+    def __init__(self, std: float = 0.001, scale_value: int = 2 ** 16 - 1):
+        """Initializes Gaussian noise operation.
+
+        Args:
+            std: standard deviation of Gaussian noise, default 0.001.
+            scale_value: scaling value, default 65535, MAX uint16."""
+
+        self.std = std
+        self.scale_value = scale_value
+
+    def __call__(self, array: np.ndarray) -> np.ndarray:
+        """Applies Gaussian noise to the array.
+
+        Args:
+            array: array to apply Gaussian noise.
+
+        Returns:
+            Gaussian noised array."""
+
+        normalized_array = array / self.scale_value
+        noised_array = normalized_array + np.random.normal(scale=self.std, size=array.shape)
+        return noised_array * self.scale_value
