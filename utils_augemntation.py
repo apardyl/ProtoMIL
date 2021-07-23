@@ -108,3 +108,38 @@ def normalize(image, target=None):
     # Replace white pixels
     returnimage[whitemask] = image[whitemask]
     return returnimage.astype(np.uint8)
+
+class RotationMultiple90:
+    """Rotation counterclockwise by multiplier of 90 degree."""
+
+    def __init__(self, multiplier: int = 1):
+        """Initializes rotation by a specified multiplier of 90 degrees.
+
+        Args:
+            multiplier: multiplier of 90 degree rotation, default 1."""
+        self.multiplier = multiplier
+
+    def __call__(self, array, multiplier = None):
+        """Rotates array counterclockwise by 90 degree with specified multiplier.
+
+        Args:
+            array: array to be rotated.
+            multiplier (optional): overwrites the multiplier set on initialization.
+
+        Returns:
+            Copy of counterclockwise rotated array."""
+        if multiplier:
+            self.multiplier = multiplier
+        return np.rot90(array, self.multiplier, (0, 1)).copy()
+
+class GaussianNoise(object):
+    def __init__(self, mean=0., std=1.):
+        self.std = std
+        self.mean = mean
+        
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+

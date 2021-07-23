@@ -362,10 +362,10 @@ while True:
         train(model=ppnet, dataloader=train_loader, optimizer=warm_optimizer, config=config, log_writer=log_writer,
               step=step, weighting_attention=args.weighting_attention)
         warm_lr_scheduler.step()
-        accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
-                     weighting_attention=args.weighting_attention)
+        # accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
+        #              weighting_attention=args.weighting_attention)
 
-        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
             weighting_attention=args.weighting_attention)
 
         push_model_state_epoch = None
@@ -380,10 +380,10 @@ while True:
         train(model=ppnet, dataloader=train_loader, optimizer=joint_optimizer, config=config, log_writer=log_writer,
               step=step, weighting_attention=args.weighting_attention)
         joint_lr_scheduler.step()
-        accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
-                     weighting_attention=args.weighting_attention)
+        # accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
+        #              weighting_attention=args.weighting_attention)
 
-        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
             weighting_attention=args.weighting_attention)
 
         push_model_state_epoch = None
@@ -405,10 +405,10 @@ while True:
             prototype_self_act_filename_prefix=prototype_self_act_filename_prefix,
             proto_bound_boxes_filename_prefix=proto_bound_boxes_filename_prefix,
             save_prototype_class_identity=True)
-        accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
-                     weighting_attention=args.weighting_attention)
+        # accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
+        #              weighting_attention=args.weighting_attention)
 
-        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
             weighting_attention=args.weighting_attention)
 
         push_model_state_epoch = epoch
@@ -427,10 +427,10 @@ while True:
         last_only(model=ppnet)
         train(model=ppnet, dataloader=train_loader, optimizer=last_layer_optimizer, config=config,
               log_writer=log_writer, step=step, weighting_attention=args.weighting_attention)
-        accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
-                     weighting_attention=args.weighting_attention)
+        # accu = valid(model=ppnet, dataloader=valid_loader, config=config, log_writer=log_writer, step=step,
+        #              weighting_attention=args.weighting_attention)
 
-        test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
+        accu = test(model=ppnet, dataloader=test_loader, config=config, log_writer=log_writer, step=step,
             weighting_attention=args.weighting_attention)
 
         iteration += 1

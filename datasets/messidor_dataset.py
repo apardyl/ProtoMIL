@@ -6,6 +6,8 @@ import cv2
 import torch
 from PIL import Image
 from PIL import ImageFile
+from torch._C import dtype
+# from torch._C import FloatTensor
 from torchvision.transforms.transforms import RandomVerticalFlip, ToPILImage
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import utils_augemntation
@@ -45,13 +47,13 @@ class DiabeticRetinopathyDataset(Dataset):
         self.r = np.random.RandomState(random_state)
         
         tr = [
+            # utils_augemntation.RotationMultiple90(),
             ToPILImage(),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
-            # GaussianNoise,
             ToTensor(),
-            # RotationMultiple90(),
-            Normalize(mean=normalization_mean, std=normalization_std)
+            Normalize(mean=normalization_mean, std=normalization_std),
+            # utils_augemntation.GaussianNoise()
             ]
         tst = [
             ToTensor(),
@@ -119,52 +121,3 @@ class DiabeticRetinopathyDataset(Dataset):
                 bags.append(curr_bag)
         return bags, labels
 
-class RotationMultiple90:
-    """Rotation counterclockwise by multiplier of 90 degree."""
-
-    def __init__(self, multiplier: int = 1):
-        """Initializes rotation by a specified multiplier of 90 degrees.
-
-        Args:
-            multiplier: multiplier of 90 degree rotation, default 1."""
-        self.multiplier = multiplier
-
-    def __call__(self, array: np.ndarray, multiplier: Optional[int] = None) -> np.ndarray:
-        """Rotates array counterclockwise by 90 degree with specified multiplier.
-
-        Args:
-            array: array to be rotated.
-            multiplier (optional): overwrites the multiplier set on initialization.
-
-        Returns:
-            Copy of counterclockwise rotated array."""
-        if multiplier:
-            self.multiplier = multiplier
-        return np.rot90(array, self.multiplier, (0, 1)).copy()
-
-
-class GaussianNoise():
-    """Gaussian noise operation."""
-
-    def __init__(self, std: float = 0.001, scale_value: int = 2 ** 16 - 1):
-        """Initializes Gaussian noise operation.
-
-        Args:
-            std: standard deviation of Gaussian noise, default 0.001.
-            scale_value: scaling value, default 65535, MAX uint16."""
-
-        self.std = std
-        self.scale_value = scale_value
-
-    def __call__(self, array: np.ndarray) -> np.ndarray:
-        """Applies Gaussian noise to the array.
-
-        Args:
-            array: array to apply Gaussian noise.
-
-        Returns:
-            Gaussian noised array."""
-
-        normalized_array = array / self.scale_value
-        noised_array = normalized_array + np.random.normal(scale=self.std, size=array.shape)
-        return noised_array * self.scale_value

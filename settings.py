@@ -234,9 +234,9 @@ MESSIDOR_SETTINGS = Settings(
         'attention': 1e-3,
         'last_layer': 1e-4,
     },
-    num_train_epochs=61,
-    num_warm_epochs=20,
+    num_train_epochs=81,
+    num_warm_epochs=40,
     num_last_layer_iterations=20,
-    push_start=20,
+    push_start=40,
     push_epochs=[i for i in range(200) if i % 20 == 0]
 )
