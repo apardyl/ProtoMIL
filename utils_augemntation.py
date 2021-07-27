@@ -2,6 +2,7 @@
 import warnings
 
 import numpy as np
+import torch
 import numpy.random as random
 import skimage
 from PIL import Image, ImageFilter
@@ -133,7 +134,7 @@ class RotationMultiple90:
         return np.rot90(array, self.multiplier, (0, 1)).copy()
 
 class GaussianNoise(object):
-    def __init__(self, mean=0., std=1.):
+    def __init__(self, mean=0., std=0.15):
         self.std = std
         self.mean = mean
         

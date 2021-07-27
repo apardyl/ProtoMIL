@@ -47,13 +47,13 @@ class DiabeticRetinopathyDataset(Dataset):
         self.r = np.random.RandomState(random_state)
         
         tr = [
-            # utils_augemntation.RotationMultiple90(),
+            utils_augemntation.RotationMultiple90(),
             ToPILImage(),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
             ToTensor(),
             Normalize(mean=normalization_mean, std=normalization_std),
-            # utils_augemntation.GaussianNoise()
+            transforms.RandomApply([utils_augemntation.GaussianNoise()], p=0.5)
             ]
         tst = [
             ToTensor(),
@@ -75,7 +75,8 @@ class DiabeticRetinopathyDataset(Dataset):
         else:
             if self.train:
                 val_indices = self.r.choice(folds[self.fold_id][0], len(folds[self.fold_id][1]), replace=False)
-                indices = set(folds[self.fold_id][0]) - set(val_indices)
+                # indices = set(folds[self.fold_id][0]) - set(val_indices)
+                indices = set(folds[self.fold_id][0])
             else:  # valid
                 indices = self.r.choice(folds[self.fold_id][0], len(folds[self.fold_id][1]), replace=False)
 
