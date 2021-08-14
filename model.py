@@ -170,6 +170,8 @@ class PPNet(nn.Module):
         if mil_pooling == 'loss_attention':
             self.loss_attention = LossAttentionLayer()
 
+        self.dropout = nn.Dropout(p=0.2)
+
     def conv_features(self, x):
         '''
         the feature input to prototype layer
@@ -256,6 +258,7 @@ class PPNet(nn.Module):
         min_distances = min_distances.view(-1, self.num_prototypes)
         prototype_activations = self.distance_2_similarity(min_distances)
 
+        #prototype_activations = self.dropout(prototype_activations)
         A = torch.ones((1, prototype_activations.shape[0])) / prototype_activations.shape[0]
         out_c = None
         if self.mil_pooling == 'gated_attention':

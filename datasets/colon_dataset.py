@@ -38,9 +38,10 @@ class ColonCancerBagsCross(data_utils.Dataset):
               utils_augemntation.RandomRotate(),
               transforms.RandomVerticalFlip(),
               transforms.RandomHorizontalFlip(),
-              transforms.RandomCrop(27, padding=(3, 3), padding_mode='reflect'),
-              transforms.RandomRotation(15),
-              transforms.ToTensor()
+              transforms.RandomCrop(27, padding=(2, 2), padding_mode='reflect'),
+              #transforms.RandomRotation(15),
+              transforms.ToTensor(),
+              #transforms.RandomApply([utils_augemntation.GaussianNoise()], p=0.5)
               ]
         tst = [utils_augemntation.HistoNormalize(),
                transforms.ToTensor()

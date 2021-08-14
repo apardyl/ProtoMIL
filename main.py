@@ -54,7 +54,7 @@ parser.add_argument('--deterministic', type=str2bool, default=True, help='Use de
 for param_name, param_type in Settings.as_params():
     parser.add_argument('--{}'.format(param_name), type=param_type)
 args = parser.parse_args()
-
+print(args.weighting_attention)
 if args.new_experiment and args.load_state:
     print('You cannot load state and start a new experiment at the same time')
     exit(-1)
@@ -115,13 +115,13 @@ else:
     print('WARNING: proceeding with non-deterministic mode.')
 
 if args.dataset == 'colon_cancer':
-    ds = ColonCancerBagsCross(path="data/ColonCancer", train=True, shuffle_bag=True, data_augmentation=True,
+    ds = ColonCancerBagsCross(path="/shared/sets/datasets/vision/ColonCancer", train=True, shuffle_bag=True, data_augmentation=True,
                               fold_id=config.fold_id, folds=config.folds, random_state=seed)
-    ds_push = ColonCancerBagsCross(path="data/ColonCancer", train=True, push=True, shuffle_bag=True,
+    ds_push = ColonCancerBagsCross(path="/shared/sets/datasets/vision/ColonCancer", train=True, push=True, shuffle_bag=True,
                                    fold_id=config.fold_id, folds=config.folds, random_state=seed)
-    ds_valid = ColonCancerBagsCross(path="data/ColonCancer", train=False, all_labels=True, fold_id=config.fold_id,
+    ds_valid = ColonCancerBagsCross(path="/shared/sets/datasets/vision/ColonCancer", train=False, all_labels=True, fold_id=config.fold_id,
                                     folds=config.folds, random_state=seed)
-    ds_test = ColonCancerBagsCross(path="data/ColonCancer", train=False, test=True, all_labels=True,
+    ds_test = ColonCancerBagsCross(path="/shared/sets/datasets/vision/ColonCancer", train=False, test=True, all_labels=True,
                                    fold_id=config.fold_id, folds=config.folds, random_state=seed)
 elif args.dataset == 'breast_cancer':
     ds = BreastCancerBagsCross(path="data/Bisque", train=True, shuffle_bag=True, data_augmentation=True,
@@ -195,15 +195,18 @@ warm_optimizer_specs = [
     },
     {
         'params': ppnet.attention_V.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     },
     {
         'params': ppnet.attention_U.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     },
     {
         'params': ppnet.attention_weights.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     }
 ]
 
@@ -214,15 +217,18 @@ last_layer_optimizer_specs = [
     },
     {
         'params': ppnet.attention_V.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     },
     {
         'params': ppnet.attention_U.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     },
     {
         'params': ppnet.attention_weights.parameters(),
-        'lr': config.last_layer_optimizer_lr['attention']
+        'lr': config.last_layer_optimizer_lr['attention'],
+        #'weight_decay': 1e-3
     }
 ]
 

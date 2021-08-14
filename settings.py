@@ -148,38 +148,39 @@ COLON_CANCER_SETTINGS = Settings(
     img_size=27,
     prototype_number=20,
     prototype_latent=128,
-    prototype_conv_dim=(2, 2),
+    prototype_conv_dim=(3, 3),
     joint_optimizer_lrs={
-        'features': 1e-5,
-        'add_on_layers': 1e-5,
-        'prototype_vectors': 1e-5,
+        'features': 1e-4,
+        'add_on_layers': 1e-4,
+        'prototype_vectors': 1e-4,
     },
     joint_lr_step_size=10,
-    joint_lr_gamma=0.3,
+    joint_lr_gamma=0.1,
     warm_optimizer_lrs={
-        'features': 1e-2,
-        'add_on_layers': 1e-2,
-        'prototype_vectors': 1e-2,
-        'attention': 1e-2,
-        'last_layer': 1e-2,
+        'features': 1e-3,
+        'add_on_layers': 1e-3,
+        'prototype_vectors': 1e-3,
+        'attention': 1e-3,
+        'last_layer': 1e-3,
     },
     warm_lr_gamma=0.95,
     last_layer_optimizer_lr={
         'attention': 1e-3,
         'last_layer': 1e-4,
     },
-    num_train_epochs=181,
-    num_warm_epochs=100,
+    num_train_epochs=101,
+    num_warm_epochs=60,
     num_last_layer_iterations=20,
-    push_start=100,
+    push_start=60,
     push_epochs=[i for i in range(200) if i % 20 == 0]
 )
+
 
 BREAST_CANCER_SETTINGS = Settings(
     base_architecture='resnet18_small',
     img_size=32,
     prototype_number=20,
-    prototype_latent=128,
+    prototype_latent=256,
     prototype_conv_dim=(2, 2),
     joint_optimizer_lrs={
         'features': 1e-5,

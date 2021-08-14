@@ -3,6 +3,7 @@ import warnings
 
 import numpy as np
 import numpy.random as random
+import torch
 import skimage
 from PIL import Image, ImageFilter
 from skimage import color
@@ -47,6 +48,18 @@ class RandomGaussianNoise(object):
     def __call__(self, img):
         img = img.filter(ImageFilter.GaussianBlur(random.normal(0.0, 0.5, 1)))
         return img
+
+
+class GaussianNoise(object):
+    def __init__(self, mean=0., std=0.2):
+        self.std = std
+        self.mean = mean
+
+    def __call__(self, img):
+        return img + torch.randn(img.size()) * self.std + self.mean
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 
 class HistoNormalize(object):
