@@ -109,7 +109,7 @@ class Settings:
 MNIST_SETTINGS = Settings(
     base_architecture='resnet18_small',
     img_size=28,
-    prototype_number=20,
+    prototype_number=10,  # 20,
     prototype_latent=64,
     prototype_conv_dim=(2, 2),
     joint_optimizer_lrs={
@@ -131,6 +131,8 @@ MNIST_SETTINGS = Settings(
         'attention': 1e-3,
         'last_layer': 1e-4,
     },
+    num_classes=1,
+    loss_function='binary_cross_entropy',
     num_train_epochs=51,
     num_warm_epochs=30,
     num_last_layer_iterations=20,

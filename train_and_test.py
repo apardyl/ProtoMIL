@@ -45,6 +45,8 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
     if config.loss_function == 'cross_entropy':
         loss_fn = torch.nn.CrossEntropyLoss()
+    elif config.loss_function == 'binary_cross_entropy':
+        loss_fn = torch.nn.BCEWithLogitsLoss()
     elif config.loss_function == 'focal':
         loss_fn = FocalLoss(alpha=0.5, gamma=2)
     else:
@@ -65,6 +67,10 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
             with grad_req:
                 output, min_distances, attention, _ = model.forward_(input)
 
+                output = output.squeeze(0)
+                target = target.float()
+                #print('output ', output)
+                #print('target ', target)
                 cross_entropy = loss_fn(output, target)
                 if config.mil_pooling == 'loss_attention':
                     instance_labels = target * torch.ones(input.size(0), dtype=torch.long, device=input.device)
@@ -87,22 +93,28 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
                         tensor_weight = torch.tensor(1).cuda()
 
                     # calculate cluster cost
-                    prototypes_of_correct_class = torch.t(model.prototype_class_identity[:, label]).cuda()
-                    inverted_distances, _ = torch.max(
-                        (max_dist - (min_distances * tensor_weight.T)) * prototypes_of_correct_class, dim=1)
-                    cluster_cost = torch.mean(max_dist - inverted_distances)
+                    prototypes_of_correct_class = torch.t(model.prototype_class_identity[:, 0]).cuda()
+                    if label == 1:
+                        inverted_distances, _ = torch.max(
+                            (max_dist - (min_distances * tensor_weight.T)) * prototypes_of_correct_class, dim=1)
+                        cluster_cost = torch.mean(max_dist - inverted_distances)
+                    else:
+                        cluster_cost = torch.tensor(0)
 
                     # calculate separation cost
-                    prototypes_of_wrong_class = 1 - prototypes_of_correct_class
-                    inverted_distances_to_nontarget_prototypes, _ = \
-                        torch.max((max_dist - (min_distances * tensor_weight.T)) * prototypes_of_wrong_class, dim=1)
-                    separation_cost = torch.mean(max_dist - inverted_distances_to_nontarget_prototypes)
+                    prototypes_of_wrong_class = torch.t(model.prototype_class_identity[:, 0]).cuda()
+                    if label == 0:
+                        inverted_distances_to_nontarget_prototypes, _ = \
+                            torch.max((max_dist - (min_distances * tensor_weight.T)) * prototypes_of_wrong_class, dim=1)
+                        separation_cost = torch.mean(max_dist - inverted_distances_to_nontarget_prototypes)
+                    else:
+                        separation_cost = torch.tensor(0)
 
                     # calculate avg cluster cost
                     avg_separation_cost = \
-                        torch.sum((min_distances * tensor_weight.T) * prototypes_of_wrong_class, dim=1) / torch.sum(
+                        torch.sum((min_distances * tensor_weight.T) * prototypes_of_wrong_class, dim=0) / torch.sum(
                             prototypes_of_wrong_class,
-                            dim=1)
+                            dim=0)
                     avg_separation_cost = torch.mean(avg_separation_cost)
 
                     if use_l1_mask:
@@ -116,12 +128,13 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
                     cluster_cost = torch.mean(min_distance)
                     l1 = model.last_layer.weight.norm(p=1)
 
-                # evaluation statistics
-                _, predicted = torch.max(output.data, 1)
+                # evaluation
+                predicted = torch.round(torch.sigmoid(output)).detach()
+                #print('predicted ', predicted)
                 n_examples += target.size(0)
                 n_correct += (predicted == target).sum().item()
 
-                pred_s = func.softmax(output, dim=-1)
+                pred_s = torch.sigmoid(output).detach() # func.softmax(output, dim=-1)
                 preds.append(pred_s.data.cpu().numpy())
                 targets.append(target.cpu().numpy())
 
@@ -164,12 +177,15 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
     preds = np.concatenate(preds)
     targets = np.concatenate(targets)
-    auc = roc_auc_score(targets, preds[..., 1])
-    pred_y = preds.argmax(1)
+    print('preds ', preds)
+    print('targets ', targets)
+    auc = roc_auc_score(targets, preds)
+    pred_y = preds.round()
+    print('pred_y ', pred_y)
     precision = precision_score(targets, pred_y, zero_division=0)
     recall = recall_score(targets, pred_y, zero_division=0)
     f1 = f1_score(targets, pred_y, zero_division=0)
-    fpr, tpr, threshold = roc_curve(targets, preds[..., 1])
+    fpr, tpr, threshold = roc_curve(targets, preds)
 
     print('\t\taccuracy:', n_correct / n_examples)
     print('\t\tauc:', auc)

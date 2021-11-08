@@ -143,7 +143,10 @@ def update_prototypes_on_batch(search_batch_raw,
         # img_y is the image's integer label
         for img_index, img_y in enumerate(search_y):
             img_label = img_y.item()
-            class_to_img_index_dict[img_label].append(img_index)
+            # add only images from positive class to dict[0] (not 1) for compatibility
+            # and leave dict[1] empty
+            if img_label == 1:
+                class_to_img_index_dict[0].append(img_index)
 
     prototype_shape = prototype_network_parallel.prototype_shape
     n_prototypes = prototype_shape[0]

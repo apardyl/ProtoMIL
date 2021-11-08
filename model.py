@@ -166,7 +166,7 @@ class PPNet(nn.Module):
                                  requires_grad=False)
 
         self.last_layer = nn.Linear(self.num_prototypes, self.num_classes,
-                                    bias=False)  # do not use bias
+                                    bias=True)  # do not use bias
 
         if init_weights:
             self._initialize_weights()

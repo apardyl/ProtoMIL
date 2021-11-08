@@ -223,10 +223,11 @@ def generate_prototype_activation_matrix(ppnet, test_push_dataloader, push_datal
         main_ax.invert_yaxis()
         main_ax.imshow(prototypes_img_with_act[i - 2])
 
-        if i - 2 < len_proto // 2:
-            main_ax.patch.set_edgecolor('red')
-        else:
-            main_ax.patch.set_edgecolor('green')
+        # if i - 2 < len_proto // 2:
+        #     main_ax.patch.set_edgecolor('red')
+        # else:
+        #     main_ax.patch.set_edgecolor('green')
+        main_ax.patch.set_edgecolor('green')
         main_ax.patch.set_linewidth('5')
 
         main_ax.get_xaxis().set_visible(False)
