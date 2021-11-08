@@ -211,25 +211,65 @@ class PPNet(nn.Module):
 
         return distances
 
-    def _l2_convolution(self, x):
-        '''
-        apply self.prototype_vectors as l2-convolution filters on input x
-        '''
-        x2 = x ** 2
-        x2_patch_sum = F.conv2d(input=x2, weight=self.ones)
+    # def _l2_convolution(self, x):
+        # '''
+        # apply self.prototype_vectors as l2-convolution filters on input x
+        # '''
+        # x2 = x ** 2
+        # x2_patch_sum = F.conv2d(input=x2, weight=self.ones)
+        #
+        # p2 = self.prototype_vectors ** 2
+        # p2 = torch.sum(p2, dim=(1, 2, 3))
+        # # p2 is a vector of shape (num_prototypes,)
+        # # then we reshape it to (num_prototypes, 1, 1)
+        # p2_reshape = p2.view(-1, 1, 1)
+        #
+        # xp = F.conv2d(input=x, weight=self.prototype_vectors)
+        # intermediate_result = - 2 * xp + p2_reshape  # use broadcast
+        # # x2_patch_sum and intermediate_result are of the same shape
+        # distances = F.relu(x2_patch_sum + intermediate_result)
+        #
+        # return distances
+    def _l2_convolution(self, xs):
+        """
+        Perform convolution over the input using the squared L2 distance for all prototypes in the layer
+        :param xs: A batch of input images obtained as output from some convolutional neural network F. Following the
+                   notation from the paper, let the shape of xs be (batch_size, D, W, H), where
+                     - D is the number of output channels of the conv net F
+                     - W is the width of the convolutional output of F
+                     - H is the height of the convolutional output of F
+        :return: a tensor of shape (batch_size, num_prototypes, W, H) obtained from computing the squared L2 distances
+                 for patches of the input using all prototypes
+        """
+        # Adapted from ProtoPNet
+        # Computing ||xs - ps ||^2 is equivalent to ||xs||^2 + ||ps||^2 - 2 * xs * ps
+        # where ps is some prototype image
 
-        p2 = self.prototype_vectors ** 2
-        p2 = torch.sum(p2, dim=(1, 2, 3))
-        # p2 is a vector of shape (num_prototypes,)
-        # then we reshape it to (num_prototypes, 1, 1)
-        p2_reshape = p2.view(-1, 1, 1)
+        # So first we compute ||xs||^2  (for all patches in the input image that is. We can do this by using convolution
+        # with weights set to 1 so each patch just has its values summed)
+        ones = torch.ones_like(self.prototype_vectors,
+                               device=xs.device)  # Shape: (num_prototypes, num_features, w_1, h_1)
+        xs_squared_l2 = F.conv2d(xs ** 2, weight=ones)  # Shape: (bs, num_prototypes, w_in, h_in)
 
-        xp = F.conv2d(input=x, weight=self.prototype_vectors)
-        intermediate_result = - 2 * xp + p2_reshape  # use broadcast
-        # x2_patch_sum and intermediate_result are of the same shape
-        distances = F.relu(x2_patch_sum + intermediate_result)
+        # Now compute ||ps||^2
+        # We can just use a sum here since ||ps||^2 is the same for each patch in the input image when computing the
+        # squared L2 distance
+        ps_squared_l2 = torch.sum(self.prototype_vectors ** 2,
+                                  dim=(1, 2, 3))  # Shape: (num_prototypes,)
+        # Reshape the tensor so the dimensions match when computing ||xs||^2 + ||ps||^2
+        ps_squared_l2 = ps_squared_l2.view(-1, 1, 1)
 
-        return distances
+        # Compute xs * ps (for all patches in the input image)
+        xs_conv = F.conv2d(xs, weight=self.prototype_vectors)  # Shape: (bs, num_prototypes, w_in, h_in)
+
+        # Use the values to compute the squared L2 distance
+        distance = xs_squared_l2 + ps_squared_l2 - 2 * xs_conv
+        distance = torch.sqrt(
+            torch.abs(distance) + 1e-14)  # L2 distance (not squared). Small epsilon added for numerical stability
+
+        if torch.isnan(distance).any():
+            raise Exception('Error: NaN values! Using the --log_probabilities flag might fix this issue')
+        return distance  # Shape: (bs, num_prototypes, w_in, h_in)
 
     def prototype_distances(self, x):
         '''
@@ -241,7 +281,8 @@ class PPNet(nn.Module):
 
     def distance_2_similarity(self, distances):
         if self.prototype_activation_function == 'log':
-            return torch.log((distances + 1) / (distances + self.epsilon))
+            #return torch.log((distances + 1) / (distances + self.epsilon))
+            return torch.exp(-distances)
         elif self.prototype_activation_function == 'linear':
             return -distances
         elif callable(self.prototype_activation_function):

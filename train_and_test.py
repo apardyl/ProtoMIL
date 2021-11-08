@@ -86,6 +86,7 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
                     attention_detached = attention.detach().cpu()
                     weight = np.interp(attention_detached, (attention_detached.min(), attention_detached.max()), (0.001, 1))
+                    #weight += 1
 
                     if weighting_attention:
                         tensor_weight = torch.tensor(weight).cuda()
@@ -177,11 +178,11 @@ def _train_or_test(model, dataloader, config: Settings, optimizer=None, use_l1_m
 
     preds = np.concatenate(preds)
     targets = np.concatenate(targets)
-    print('preds ', preds)
-    print('targets ', targets)
+    # print('preds ', preds)
+    # print('targets ', targets)
     auc = roc_auc_score(targets, preds)
     pred_y = preds.round()
-    print('pred_y ', pred_y)
+    # print('pred_y ', pred_y)
     precision = precision_score(targets, pred_y, zero_division=0)
     recall = recall_score(targets, pred_y, zero_division=0)
     f1 = f1_score(targets, pred_y, zero_division=0)
